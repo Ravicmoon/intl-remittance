@@ -1,4 +1,6 @@
 {
-  "/page": "app/page.js",
-  "/face-login/page": "app/face-login/page.js"
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/lvauth/align/route": "app/api/lvauth/align/route.js",
+  "/face-login/page": "app/face-login/page.js",
+  "/page": "app/page.js"
 }

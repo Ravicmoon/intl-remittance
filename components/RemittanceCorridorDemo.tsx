@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 
 type Entity = { id: string; name: string; type: "bank" | "fintech"; country: "UZ" | "KR" };
 type CCY = "UZS" | "KRW" | "USD";
@@ -67,7 +68,25 @@ export default function RemittanceMain({ onStartFaceLogin }: MainProps) {
   }, [theme]);
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  useEffect(() => { try { setIsLoggedIn(localStorage.getItem("lv_verified") === "1"); } catch {} }, []);
+  const [profile, setProfile] = useState<null | { name?: string; userId?: string }>(null);
+  const refreshAuth = () => {
+    try {
+      const verified = localStorage.getItem("lv_verified") === "1";
+      setIsLoggedIn(verified);
+      const raw = localStorage.getItem("lv_profile");
+      setProfile(raw ? JSON.parse(raw) : null);
+    } catch {}
+  };
+  useEffect(() => { refreshAuth(); }, []);
+  useEffect(() => {
+    const onFocus = () => refreshAuth();
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pageshow", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onFocus);
+    };
+  }, []);
 
   const [uzEntity, setUzEntity] = useState<string>(UZ_ENTITIES[0].id);
   const [krEntity, setKrEntity] = useState<string>(KR_ENTITIES[0].id);
@@ -97,6 +116,24 @@ export default function RemittanceMain({ onStartFaceLogin }: MainProps) {
     return { fee: displayFee, feeCcy: feeModel.settlementCurrency, recipientGets } as const;
   }, [feeModel, parsedAmount, senderCcy, recipientCcy]);
 
+  const logout = () => {
+    try { localStorage.removeItem("lv_verified"); } catch {}
+    setIsLoggedIn(false);
+  };
+
+  const deleteProfile = async () => {
+    try {
+      const raw = localStorage.getItem("lv_profile");
+      const p = raw ? JSON.parse(raw) : null;
+      if (p?.userId) {
+        await fetch("/api/lvauth/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: p.userId }) });
+      }
+    } catch {}
+    try { localStorage.removeItem("lv_profile"); localStorage.removeItem("lv_verified"); } catch {}
+    setProfile(null);
+    setIsLoggedIn(false);
+  };
+
   const formatNumber = (n: number) => n.toLocaleString();
   const arrow = direction === "UZS_to_KRW" ? "→" : "←";
   const themeBtnLabel = mounted ? (theme === "dark" ? "Light" : "Dark") : "Theme";
@@ -105,7 +142,11 @@ export default function RemittanceMain({ onStartFaceLogin }: MainProps) {
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950">
       <header className="sticky top-0 z-10 border-b bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-900/70">
         <div className="mx-auto flex max-w-6xl items-center justify-between p-4">
-          <div className="flex items-center gap-2"><span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-medium text-white dark:bg-white dark:text-slate-900">LightVision</span><h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Uzbekistan {arrow} South Korea</h1></div>
+          <div className="flex items-center gap-3">
+            <Image src="/lv-logo-light.png" alt="LightVision" width={112} height={24} className="block dark:hidden" />
+            <Image src="/lv-logo-dark.png" alt="LightVision" width={112} height={24} className="hidden dark:block" />
+            <h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Uzbekistan {arrow} South Korea</h1>
+          </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="rounded-xl border px-3 py-1.5 text-sm font-semibold hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">{themeBtnLabel}</button>
             {isLoggedIn ? (
@@ -199,104 +240,297 @@ export function FaceLogin({ onBack }: FaceProps) {
   const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<Theme>("light");
   useEffect(() => { setMounted(true); }, []);
-  useEffect(() => {
-    try {
-      const ls = localStorage.getItem("theme");
-      if (ls === "dark" || (!ls && window.matchMedia("(prefers-color-scheme: dark)").matches)) setTheme("dark");
-      else setTheme("light");
-    } catch {}
-  }, []);
-  useEffect(() => {
-    if (typeof document !== "undefined") {
-      document.documentElement.classList.toggle("dark", theme === "dark");
-      try { localStorage.setItem("theme", theme); } catch {}
-    }
-  }, [theme]);
+  useEffect(() => { try { const ls = localStorage.getItem("theme"); if (ls === "dark" || (!ls && window.matchMedia("(prefers-color-scheme: dark)").matches)) setTheme("dark"); else setTheme("light"); } catch {} }, []);
+  useEffect(() => { if (typeof document !== "undefined") { document.documentElement.classList.toggle("dark", theme === "dark"); try { localStorage.setItem("theme", theme); } catch {} } }, [theme]);
 
+  type FlowStep = "welcome" | "select" | "consent" | "capture" | "snapshotConfirm" | "alignConfirm" | "processing" | "result";
+  const [step, setStep] = useState<FlowStep>("welcome");
+  const [mode, setMode] = useState<"verify" | "register">("verify");
+  const [userId, setUserId] = useState("");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loginStatus, setLoginStatus] = useState<"idle" | "opening" | "capturing" | "verifying" | "success" | "failed">("idle");
+  const [error, setError] = useState("");
+  const [snapshot, setSnapshot] = useState<string | null>(null);
+  const [aligned, setAligned] = useState<string | null>(null);
+  const [result, setResult] = useState<any>(null);
+  const [finding, setFinding] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
+
   useEffect(() => { try { setIsLoggedIn(localStorage.getItem("lv_verified") === "1"); } catch {} }, []);
 
-  const [loginStatus, setLoginStatus] = useState<"idle" | "opening" | "capturing" | "verifying" | "success" | "failed">("idle");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const themeBtnLabel = mounted ? (theme === "dark" ? "Light" : "Dark") : "Theme";
 
-  const openCamera = async () => {
-    try {
-      setLoginStatus("opening");
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        // @ts-ignore
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      setLoginStatus("capturing");
-    } catch {
-      setLoginStatus("failed");
+  const attachStreamToVideo = async () => {
+    const v = videoRef.current;
+    const s = streamRef.current;
+    if (!v || !s) return;
+    // @ts-ignore
+    if (v.srcObject !== s) v.srcObject = s;
+    v.muted = true;
+    // @ts-ignore
+    v.playsInline = true;
+    // @ts-ignore
+    v.autoplay = true;
+    await new Promise<void>((res) => {
+      const onLoaded = () => { v.removeEventListener("loadedmetadata", onLoaded as any); res(); };
+      v.addEventListener("loadedmetadata", onLoaded as any);
+      if (v.readyState >= 1) res();
+    });
+    if (v.readyState < 2 || !v.videoWidth) {
+      await new Promise<void>((res) => {
+        const onCanPlay = () => { v.removeEventListener("canplay", onCanPlay as any); res(); };
+        v.addEventListener("canplay", onCanPlay as any);
+        if (v.readyState >= 2) res();
+      });
     }
+    try { await v.play(); } catch {}
+    setVideoReady((v.videoWidth || 0) > 0);
   };
 
-  const captureAndVerify = async () => {
-    if (!videoRef.current) return;
-    setLoginStatus("verifying");
-    const canvas = document.createElement("canvas");
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.drawImage(videoRef.current, 0, 0);
-    await new Promise((r) => setTimeout(r, 1000));
-    const ok = true;
-    if (ok) {
-      try { localStorage.setItem("lv_verified", "1"); } catch {}
-      setLoginStatus("success");
-      setIsLoggedIn(true);
-      stopCamera();
-      if (onBack) onBack(); else window.location.href = "/";
-    } else {
-      setLoginStatus("failed");
+  const ensureCamera = async () => {
+    if (!streamRef.current) {
+      try {
+        setLoginStatus("opening");
+        setError("");
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+        streamRef.current = stream;
+      } catch {
+        setLoginStatus("failed");
+        setError("camera");
+        return;
+      }
     }
+    await attachStreamToVideo();
+    setLoginStatus("capturing");
+  };
+
+  async function callLV(path: string, body: any) {
+    const res = await fetch(`/api/lvauth/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "fail");
+    return data;
+  }
+
+  const captureFromVideo = () => {
+    const v = videoRef.current;
+    if (!v || v.readyState < 2 || !v.videoWidth) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = v.videoWidth;
+    canvas.height = v.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.92);
+  };
+
+  const onFile = (file?: File | null) => {
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = () => setSnapshot(String(r.result));
+    r.readAsDataURL(file);
+  };
+
+  useEffect(() => {
+    if (step === "capture") ensureCamera();
+  }, [step]);
+
+  const nextStep = async () => {
+    if (step === "welcome") setStep("select");
+    else if (step === "select") setStep("consent");
+    else if (step === "consent") setStep("capture");
+    else if (step === "capture") {
+      const img = snapshot || captureFromVideo();
+      if (!img) { setError("camera"); return; }
+      setSnapshot(img);
+      setStep("snapshotConfirm");
+    }
+    else if (step === "snapshotConfirm") {
+      setLoginStatus("verifying");
+      setStep("alignConfirm");
+      try {
+        const a = await callLV("align", { image: snapshot });
+        setAligned(a?.aligned || snapshot);
+        setLoginStatus("idle");
+      } catch {
+        setAligned(snapshot);
+        setLoginStatus("failed");
+      }
+    }
+    else if (step === "alignConfirm") {
+      setLoginStatus("verifying");
+      setStep("processing");
+      try {
+        if (mode === "register") {
+          const r = await callLV("register", { image: aligned, userId: userId || undefined });
+          setResult(r);
+        } else {
+          const r = await callLV("verify", { image: snapshot });
+          setResult(r);
+          try { localStorage.setItem("lv_verified", "1"); } catch {}
+          setIsLoggedIn(true);
+        }
+        setLoginStatus("success");
+        setStep("result");
+      } catch {
+        setLoginStatus("failed");
+        setError(mode);
+        setStep("result");
+      }
+    }
+    else if (step === "result") { if (onBack) onBack(); else window.location.href = "/"; }
+  };
+
+  const backStep = () => {
+    if (step === "select") setStep("welcome");
+    else if (step === "consent") setStep("select");
+    else if (step === "capture") setStep("consent");
+    else if (step === "snapshotConfirm") setStep("capture");
+    else if (step === "alignConfirm") setStep("snapshotConfirm");
+    else if (step === "result") setStep("welcome");
   };
 
   const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      // @ts-ignore
-      videoRef.current.srcObject = null;
-    }
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+    if (videoRef.current) { /* @ts-ignore */ videoRef.current.srcObject = null; }
+    setVideoReady(false);
   };
-
   useEffect(() => () => stopCamera(), []);
-  const themeBtnLabel = mounted ? (theme === "dark" ? "Light" : "Dark") : "Theme";
+
+  const doFind = async () => {
+    setFinding(true);
+    try {
+      await ensureCamera();
+      const img = captureFromVideo() || snapshot;
+      if (!img) { setFinding(false); return; }
+      const r = await callLV("find", { image: img });
+      setResult((prev: any) => ({ ...prev, find: r }));
+    } finally { setFinding(false); }
+  };
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950">
       <header className="border-b bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-900/70">
         <div className="mx-auto flex max-w-6xl items-center justify-between p-4">
-          <div className="flex items-center gap-2"><span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-medium text-white dark:bg-white dark:text-slate-900">LightVision</span><span className="text-sm text-slate-500 dark:text-slate-400">Face Login</span></div>
+          <div className="flex items-center gap-3">
+            <img src="/lv-logo-light.png" alt="LightVision" className="block h-6 dark:hidden" />
+            <img src="/lv-logo-dark.png" alt="LightVision" className="hidden h-6 dark:block" />
+            <span className="text-sm text-slate-500 dark:text-slate-400">Face</span>
+          </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="rounded-xl border px-3 py-1.5 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">{themeBtnLabel}</button>
-            <button onClick={() => { stopCamera(); if (onBack) onBack(); else window.location.href = "/"; }} className="rounded-xl border px-3 py-1.5 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">Back</button>
+            <button onClick={() => { if (onBack) onBack(); else window.location.href = "/"; }} className="rounded-xl border px-3 py-1.5 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">Back</button>
           </div>
         </div>
       </header>
+
       <main className="mx-auto grid max-w-6xl gap-6 p-4 md:grid-cols-3">
         <section className="md:col-span-2 rounded-2xl border bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="border-b p-4 font-semibold dark:border-slate-800">Verification</div>
-          <div className="p-4">
-            <div className="aspect-video overflow-hidden rounded-xl bg-black/90 ring-1 ring-black/10">
-              <video ref={videoRef} className="h-full w-full object-cover" muted playsInline />
-            </div>
-            <div className="mt-3 flex gap-2">
-              <button onClick={openCamera} disabled={loginStatus === "capturing" || loginStatus === "verifying"} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">{loginStatus === "capturing" ? "Camera Ready" : loginStatus === "opening" ? "Opening..." : "Start Camera"}</button>
-              <button onClick={captureAndVerify} disabled={loginStatus !== "capturing"} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 disabled:opacity-50 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Verify Face</button>
-            </div>
-            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Demo only. Replace with LV Auth API.</p>
+          <div className="border-b p-4 font-semibold dark:border-slate-800">{step === "welcome" ? "Welcome" : step === "select" ? "Select" : step === "consent" ? "Consent" : step === "capture" ? "Capture" : step === "snapshotConfirm" ? "Confirm snapshot" : step === "alignConfirm" ? "Confirm aligned" : step === "processing" ? "Processing" : "Result"}</div>
+          <div className="p-4 space-y-4">
+            {step === "welcome" && (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-600 dark:text-slate-300">We will use your camera to verify or register your face.</p>
+                <button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Start</button>
+              </div>
+            )}
+
+            {step === "select" && (
+              <div className="space-y-3">
+                <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+                  <button onClick={() => setMode("verify")} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${mode === "verify" ? "bg-white shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-slate-700" : "text-slate-600 dark:text-slate-300"}`}>Verify</button>
+                  <button onClick={() => setMode("register")} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${mode === "register" ? "bg-white shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-slate-700" : "text-slate-600 dark:text-slate-300"}`}>Register</button>
+                </div>
+                {mode === "register" && (
+                  <div>
+                    <label className="text-xs text-slate-600 dark:text-slate-300">User ID</label>
+                    <input value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="e.g., test-user" className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <button onClick={nextStep} disabled={mode==='register' && !userId} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">Continue</button>
+                  <button onClick={backStep} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button>
+                </div>
+              </div>
+            )}
+
+            {step === "consent" && (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-600 dark:text-slate-300">By continuing, you agree to capture and process facial imagery for {mode==='verify'?"verification":"registration"}.</p>
+                <div className="flex gap-2"><button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">I agree</button><button onClick={backStep} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button></div>
+              </div>
+            )}
+
+            {step === "capture" && (
+              <div className="space-y-3">
+                <div className="aspect-video overflow-hidden rounded-xl bg-black/90 ring-1 ring-black/10">
+                  <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <button onClick={nextStep} disabled={!videoReady && !snapshot} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">Capture Snapshot</button>
+                  <label className="relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">
+                    Upload Image
+                    <input type="file" accept="image/*" onChange={(e) => onFile(e.target.files?.[0])} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+                  </label>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={ensureCamera} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">{loginStatus === "capturing" ? "Restart Camera" : loginStatus === "opening" ? "Opening..." : "Start Camera"}</button>
+                  <button onClick={backStep} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button>
+                </div>
+                {!!snapshot && <div className="text-xs text-slate-500 dark:text-slate-400">Image loaded; you can continue.</div>}
+              </div>
+            )}
+
+            {step === "snapshotConfirm" && snapshot && (
+              <div className="space-y-3">
+                <img src={snapshot} alt="snapshot" className="aspect-video w-full rounded-xl object-cover ring-1 ring-black/10" />
+                <div className="flex gap-2">
+                  <button onClick={() => setStep("capture")} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Retake</button>
+                  <button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Use this</button>
+                </div>
+              </div>
+            )}
+
+            {step === "alignConfirm" && (
+              <div className="space-y-3">
+                <div className="aspect-video overflow-hidden rounded-xl bg-slate-100 ring-1 ring-black/10 dark:bg-slate-800">
+                  {aligned ? <img src={aligned} alt="aligned" className="h-full w-full object-contain" /> : <div className="flex h-full w-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">Aligning…</div>}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setStep("snapshotConfirm")} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button>
+                  <button onClick={nextStep} disabled={!aligned && loginStatus!=="idle"} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">Confirm aligned</button>
+                </div>
+              </div>
+            )}
+
+            {step === "processing" && (
+              <div className="space-y-3">
+                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-full w-1/3 animate-pulse rounded-full bg-slate-400 dark:bg-slate-600" /></div>
+              </div>
+            )}
+
+            {step === "result" && (
+              <div className="space-y-4">
+                {result?.id && <div className="text-sm">Registered ID: <span className="font-semibold">{result.id}</span></div>}
+                {result?.face && <img src={result.face} alt="registered" className="h-40 w-40 rounded-xl object-cover ring-1 ring-black/10" />}
+                {!!error && <p className="text-sm text-rose-600">{error}</p>}
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Done</button>
+                  <button onClick={() => setStep("welcome")} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Restart</button>
+                  <button onClick={doFind} disabled={finding} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-indigo-500">{finding?"Finding…":"Find"}</button>
+                </div>
+                {result?.find && (
+                  <div className="rounded-xl border p-3 text-sm dark:border-slate-800">
+                    <div className="font-semibold">Find Result</div>
+                    <pre className="mt-2 whitespace-pre-wrap text-xs">{JSON.stringify(result.find, null, 2)}</pre>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </section>
+
         <aside className="rounded-2xl border bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="font-semibold">Status</div>
           <div className="mt-3 space-y-2">
