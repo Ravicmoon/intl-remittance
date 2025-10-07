@@ -49,19 +49,25 @@ const FEE_TABLE: Record<string, { base: number; pct: number; min: number; max: n
 };
 
 export default function RemittanceMain({ onStartFaceLogin }: MainProps) {
-  const initialTheme: Theme = typeof window !== 'undefined' && (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) ? 'dark' : 'light';
-  const [theme, setTheme] = useState<Theme>(initialTheme);
+  const [mounted, setMounted] = useState(false);
+  const [theme, setTheme] = useState<Theme>("light");
+  useEffect(() => { setMounted(true); }, []);
   useEffect(() => {
-    if (typeof document !== 'undefined') {
-      document.documentElement.classList.toggle('dark', theme === 'dark');
-      localStorage.theme = theme;
+    try {
+      const ls = localStorage.getItem("theme");
+      if (ls === "dark" || (!ls && window.matchMedia("(prefers-color-scheme: dark)").matches)) setTheme("dark");
+      else setTheme("light");
+    } catch {}
+  }, []);
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.toggle("dark", theme === "dark");
+      try { localStorage.setItem("theme", theme); } catch {}
     }
   }, [theme]);
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  useEffect(() => {
-    try { setIsLoggedIn(localStorage.getItem('lv_verified') === '1'); } catch {}
-  }, []);
+  useEffect(() => { try { setIsLoggedIn(localStorage.getItem("lv_verified") === "1"); } catch {} }, []);
 
   const [uzEntity, setUzEntity] = useState<string>(UZ_ENTITIES[0].id);
   const [krEntity, setKrEntity] = useState<string>(KR_ENTITIES[0].id);
@@ -80,7 +86,7 @@ export default function RemittanceMain({ onStartFaceLogin }: MainProps) {
   }, [amount]);
 
   const quote = useMemo(() => {
-    if (!feeModel) return { fee: 0, feeCcy: 'KRW', recipientGets: 0 } as const;
+    if (!feeModel) return { fee: 0, feeCcy: "KRW", recipientGets: 0 } as const;
     const base = feeModel.base;
     const pct = feeModel.pct * parsedAmount;
     const rawFeeSender = Math.min(Math.max(base + pct, feeModel.min), feeModel.max);
@@ -93,6 +99,7 @@ export default function RemittanceMain({ onStartFaceLogin }: MainProps) {
 
   const formatNumber = (n: number) => n.toLocaleString();
   const arrow = direction === "UZS_to_KRW" ? "→" : "←";
+  const themeBtnLabel = mounted ? (theme === "dark" ? "Light" : "Dark") : "Theme";
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950">
@@ -100,7 +107,7 @@ export default function RemittanceMain({ onStartFaceLogin }: MainProps) {
         <div className="mx-auto flex max-w-6xl items-center justify-between p-4">
           <div className="flex items-center gap-2"><span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-medium text-white dark:bg-white dark:text-slate-900">LightVision</span><h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Uzbekistan {arrow} South Korea</h1></div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="rounded-xl border px-3 py-1.5 text-sm font-semibold hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">{theme === 'dark' ? 'Light' : 'Dark'}</button>
+            <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="rounded-xl border px-3 py-1.5 text-sm font-semibold hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">{themeBtnLabel}</button>
             {isLoggedIn ? (
               <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">Verified</span>
             ) : (
@@ -123,7 +130,7 @@ export default function RemittanceMain({ onStartFaceLogin }: MainProps) {
             <div className="grid gap-4 p-4 md:grid-cols-2">
               <div className="space-y-3">
                 <label className="text-sm text-slate-600 dark:text-slate-300">Uzbekistan Entity</label>
-                <select value={uzEntity} onChange={(e) => setUzEntity(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white">
+                <select value={uzEntity} onChange={(e) => setUzEntity(e.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white">
                   {UZ_ENTITIES.map((e) => (<option key={e.id} value={e.id}>{e.name}</option>))}
                 </select>
                 <label className="text-sm text-slate-600 dark:text-slate-300">Uz Currency</label>
@@ -135,7 +142,7 @@ export default function RemittanceMain({ onStartFaceLogin }: MainProps) {
 
               <div className="space-y-3">
                 <label className="text-sm text-slate-600 dark:text-slate-300">South Korea Entity</label>
-                <select value={krEntity} onChange={(e) => setKrEntity(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white">
+                <select value={krEntity} onChange={(e) => setKrEntity(e.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white">
                   {KR_ENTITIES.map((e) => (<option key={e.id} value={e.id}>{e.name}{e.type === "fintech" ? " (fintech)" : ""}</option>))}
                 </select>
                 <div className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800 dark:text-slate-100">
@@ -146,7 +153,7 @@ export default function RemittanceMain({ onStartFaceLogin }: MainProps) {
 
               <div className="space-y-3 md:col-span-2">
                 <label className="text-sm text-slate-600 dark:text-slate-300">Amount ({direction === "UZS_to_KRW" ? `${uzCurrency} (sender)` : "KRW (sender)"})</label>
-                <input inputMode="numeric" placeholder={direction === "UZS_to_KRW" ? (uzCurrency === "UZS" ? "e.g., 2,000,000" : "e.g., 100") : "e.g., 500,000"} value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ""))} className="w-full rounded-xl border px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                <input inputMode="numeric" placeholder={direction === "UZS_to_KRW" ? (uzCurrency === "UZS" ? "e.g., 2,000,000" : "e.g., 100") : "e.g., 500,000"} value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ""))} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500" />
                 <div className="text-xs text-slate-500 dark:text-slate-400">1 USD ≈ {FX.USD_TO_KRW.toLocaleString()} KRW • 1 USD ≈ {FX.USD_TO_UZS.toLocaleString()} UZS</div>
               </div>
             </div>
@@ -183,24 +190,31 @@ export default function RemittanceMain({ onStartFaceLogin }: MainProps) {
         </section>
       </main>
 
-      <footer className="mx-auto max-w-6xl p-6 text-center text-xs text-slate-500 dark:text-slate-400">© {new Date().getFullYear()} LightVision Inc. — Demo UI</footer>
+      <footer className="mx-auto max-w-6xl p-6 text-center text-xs text-slate-500 dark:text-slate-400">© {new Date().getFullYear()} LightVision Inc.</footer>
     </div>
   );
 }
 
 export function FaceLogin({ onBack }: FaceProps) {
-  const [theme, setTheme] = useState<Theme>(() => (typeof window !== 'undefined' && (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) ? 'dark' : 'light'));
+  const [mounted, setMounted] = useState(false);
+  const [theme, setTheme] = useState<Theme>("light");
+  useEffect(() => { setMounted(true); }, []);
   useEffect(() => {
-    if (typeof document !== 'undefined') {
-      document.documentElement.classList.toggle('dark', theme === 'dark');
-      localStorage.theme = theme;
+    try {
+      const ls = localStorage.getItem("theme");
+      if (ls === "dark" || (!ls && window.matchMedia("(prefers-color-scheme: dark)").matches)) setTheme("dark");
+      else setTheme("light");
+    } catch {}
+  }, []);
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.toggle("dark", theme === "dark");
+      try { localStorage.setItem("theme", theme); } catch {}
     }
   }, [theme]);
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  useEffect(() => {
-    try { setIsLoggedIn(localStorage.getItem('lv_verified') === '1'); } catch {}
-  }, []);
+  useEffect(() => { try { setIsLoggedIn(localStorage.getItem("lv_verified") === "1"); } catch {} }, []);
 
   const [loginStatus, setLoginStatus] = useState<"idle" | "opening" | "capturing" | "verifying" | "success" | "failed">("idle");
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -212,6 +226,7 @@ export function FaceLogin({ onBack }: FaceProps) {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
       streamRef.current = stream;
       if (videoRef.current) {
+        // @ts-ignore
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
@@ -233,7 +248,7 @@ export function FaceLogin({ onBack }: FaceProps) {
     await new Promise((r) => setTimeout(r, 1000));
     const ok = true;
     if (ok) {
-      try { localStorage.setItem('lv_verified', '1'); } catch {}
+      try { localStorage.setItem("lv_verified", "1"); } catch {}
       setLoginStatus("success");
       setIsLoggedIn(true);
       stopCamera();
@@ -248,10 +263,14 @@ export function FaceLogin({ onBack }: FaceProps) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    if (videoRef.current) videoRef.current.srcObject = null;
+    if (videoRef.current) {
+      // @ts-ignore
+      videoRef.current.srcObject = null;
+    }
   };
 
   useEffect(() => () => stopCamera(), []);
+  const themeBtnLabel = mounted ? (theme === "dark" ? "Light" : "Dark") : "Theme";
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950">
@@ -259,7 +278,7 @@ export function FaceLogin({ onBack }: FaceProps) {
         <div className="mx-auto flex max-w-6xl items-center justify-between p-4">
           <div className="flex items-center gap-2"><span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-medium text-white dark:bg-white dark:text-slate-900">LightVision</span><span className="text-sm text-slate-500 dark:text-slate-400">Face Login</span></div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="rounded-xl border px-3 py-1.5 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">{theme === 'dark' ? 'Light' : 'Dark'}</button>
+            <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="rounded-xl border px-3 py-1.5 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">{themeBtnLabel}</button>
             <button onClick={() => { stopCamera(); if (onBack) onBack(); else window.location.href = "/"; }} className="rounded-xl border px-3 py-1.5 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">Back</button>
           </div>
         </div>

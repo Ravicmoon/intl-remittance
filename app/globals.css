@@ -2,4 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: light dark; }
+/* Ensure native form controls match the active theme */
+@layer base {
+  :root { color-scheme: light; }
+  .dark { color-scheme: dark; }
+}
