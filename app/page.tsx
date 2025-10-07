@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { RemittanceMain } from "@/components/RemittanceMain";
+import RemittanceMain from "@/components/RemittanceMain";
 
 export default function Page() {
   const router = useRouter();

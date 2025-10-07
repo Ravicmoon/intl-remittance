@@ -1,2 +1,2 @@
 "use client";
-export { default as RemittanceMain } from "../RemittanceCorridorDemo";
+export { default } from "./RemittanceCorridorDemo";

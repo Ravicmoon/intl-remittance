@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { FaceLogin } from "@/components/FaceLogin";
+import FaceLogin from "@/components/FaceLogin";
 
 export default function FaceLoginPage() {
   const router = useRouter();
