@@ -250,7 +250,7 @@ export default function Page() {
   const onVerifyNow = () => {
     setMode("verify");
     nextStep("verify"); // force verify on this click
-  };  
+  };
 
   return (
     <main className="mx-auto grid max-w-6xl gap-6 p-4 md:grid-cols-3">
