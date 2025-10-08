@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ExternalLink } from "lucide-react";
 
+type Props = { onStartFaceLogin?: () => void };
 type Country = "KR" | "UZ";
 type CCY = "KRW" | "UZS" | "USD";
 type Entity = { id: string; name: string; type: "bank" | "fintech"; country: Country };
@@ -56,7 +57,7 @@ function calcFee(amount: number, m: Model) {
   return Math.round(Math.min(Math.max(m.base + m.pct * amount, m.min), m.max));
 }
 
-export default function RemittanceCorridorDemo() {
+export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
   const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -138,7 +139,7 @@ export default function RemittanceCorridorDemo() {
           <div className="flex items-center gap-2">
             <button onClick={() => { const next = theme === "dark" ? "light" : "dark"; setTheme(next); try { localStorage.setItem("theme", next); } catch {}; document.documentElement.classList.toggle("dark", next === "dark"); }} className="rounded-xl border px-3 py-1.5 text-sm font-semibold hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">{themeBtnLabel}</button>
             {!isLoggedIn ? (
-              <button onClick={() => (window.location.href = "/face-login")} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Face Login</button>
+              <button onClick={() => (onStartFaceLogin ? onStartFaceLogin() : (window.location.href = "/face-login"))} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Face Login</button>
             ) : (
               <div className="flex items-center gap-2">
                 {userId && <span className="text-sm text-slate-700 dark:text-slate-200">ID: <span className="font-semibold">{userId}</span></span>}
