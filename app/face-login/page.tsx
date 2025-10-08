@@ -13,8 +13,18 @@ export default function Page() {
   const [aligned, setAligned] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [alreadyRegistered, setAlreadyRegistered] = useState<boolean>(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  const resetAll = () => {
+    setErrorMsg(null);
+    setAlreadyRegistered(false);
+    setSnapshot(null);
+    setAligned(null);
+    setResult(null);
+    setLoginStatus("idle");
+  };
 
   const attachStreamToVideo = async () => {
     const v = videoRef.current;
@@ -62,6 +72,7 @@ export default function Page() {
 
   useEffect(() => { if (step === "capture") ensureCamera(); }, [step]);
   useEffect(() => () => { if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; } }, []);
+  useEffect(() => { if (step === "select") { setErrorMsg(null); setAlreadyRegistered(false); } }, [step]);
 
   const captureFromVideo = () => {
     const v = videoRef.current; if (!v || v.readyState < 2 || !v.videoWidth) return null;
@@ -131,88 +142,115 @@ export default function Page() {
     return null;
   }
 
-  const nextStep = async () => {
+  const nextStep = async (forceMode?: "verify" | "register") => {
     setErrorMsg(null);
-    if (step === "select") setStep("capture");
-    else if (step === "capture") {
+    setAlreadyRegistered(false);
+  
+    if (step === "select") {
+      setStep("capture");
+      return;
+    }
+  
+    if (step === "capture") {
       const img = captureFromVideo() || snapshot;
       if (!img) { setErrorMsg("No image captured. Please start the camera or upload a photo."); return; }
       setSnapshot(img);
       setStep("snapshotConfirm");
+      return;
     }
-    else if (step === "snapshotConfirm") {
-      if (mode === "register") {
-        setLoginStatus("verifying"); setStep("alignConfirm");
+  
+    if (step === "snapshotConfirm") {
+      const currentMode = forceMode ?? mode;
+  
+      if (currentMode === "register") {
+        setLoginStatus("verifying");
+        setStep("alignConfirm");
         try {
           const raw = stripDataUrl(snapshot);
-          if(!raw) throw new Error("noimage");
+          if (!raw) throw new Error("noimage");
           const created = await apiCreate(raw);
           setResult({ id: created.id });
           setAligned(`data:image/png;base64,${created.image}`);
           setLoginStatus("idle");
         } catch (e: any) {
           if (e?.status === 409) {
-            setErrorMsg("You are already registered to the service.");
+            setErrorMsg("You are already registered to the service. You can switch to verification.");
+            setAlreadyRegistered(true);
             setLoginStatus("idle");
-            setStep("select");
+            setStep("snapshotConfirm");
             return;
           }
           setAligned(snapshot);
           setLoginStatus("failed");
           setErrorMsg(e?.message || "Registration failed. Please try again.");
-          // stay on snapshotConfirm so user can retry
           setStep("snapshotConfirm");
         }
-      } else {
-        setLoginStatus("verifying");
-        try {
-          const raw = stripDataUrl(snapshot);
-          if(!raw) throw new Error("nover");
-          const r = await apiCheck(raw);
-          setResult(r);
-          const id = extractId(r);
-          if (id) {
-            try { localStorage.setItem("lv_verified", "1"); localStorage.setItem("lv_user_id", id); } catch {}
-          }
-          setLoginStatus("success"); setStep("result");
-        } catch (e: any) {
-          setLoginStatus("failed");
-          setErrorMsg(e?.message || "Verification failed. Please retake your photo and try again.");
-          // stay on snapshotConfirm to let the user retake
-          setStep("snapshotConfirm");
-        }
+        return;
       }
+  
+      // verify
+      setLoginStatus("verifying");
+      try {
+        const raw = stripDataUrl(snapshot);
+        if (!raw) throw new Error("nover");
+        const r = await apiCheck(raw);
+        setResult(r);
+        const id = extractId(r);
+        if (id) {
+          try { localStorage.setItem("lv_verified", "1"); localStorage.setItem("lv_user_id", id); } catch {}
+        }
+        setLoginStatus("success");
+        setErrorMsg(null);
+        setStep("result");
+      } catch (e: any) {
+        setLoginStatus("failed");
+        setErrorMsg(e?.message || "Verification failed. Please retake your photo and try again.");
+        setStep("snapshotConfirm");
+      }
+      return;
     }
-    else if (step === "alignConfirm") {
+  
+    if (step === "alignConfirm") {
       setLoginStatus("verifying");
       try {
         const id = (result?.id ?? "");
         const raw = stripDataUrl(aligned);
-        if(!id || !raw) throw new Error("noconfirm");
+        if (!id || !raw) throw new Error("noconfirm");
         const r = await apiConfirm(id, raw);
-        setResult((prev:any)=>({ ...prev, ...r, face: aligned }));
+        setResult((prev: any) => ({ ...prev, ...r, face: aligned }));
         const extractedId = extractId({ ...r, id });
         if (extractedId) {
           try { localStorage.setItem("lv_verified", "1"); localStorage.setItem("lv_user_id", extractedId); } catch {}
         }
-        setLoginStatus("success"); setStep("result");
+        setLoginStatus("success");
+        setErrorMsg(null);
+        setStep("result");
       } catch (e: any) {
         setLoginStatus("failed");
         setErrorMsg(e?.message || "Registration confirmation failed. Please retry.");
-        // remain on alignConfirm so the user can re-confirm or go back
         setStep("alignConfirm");
       }
+      return;
     }
-    else if (step === "result") { window.location.href = "/"; }
-  };
+  
+    if (step === "result") {
+      window.location.href = "/";
+    }
+  };  
 
   const backStep = () => {
     setErrorMsg(null);
+    setAlreadyRegistered(false);
     if (step === "capture") setStep("select");
     else if (step === "snapshotConfirm") { setSnapshot(null); setAligned(null); setStep("capture"); }
     else if (step === "alignConfirm") setStep("snapshotConfirm");
     else if (step === "result") setStep("select");
   };
+
+  const onVerifyNow = () => {
+    setMode("verify");
+    nextStep("verify"); // force verify on this click
+  };  
 
   return (
     <main className="mx-auto grid max-w-6xl gap-6 p-4 md:grid-cols-3">
@@ -222,17 +260,25 @@ export default function Page() {
         </div>
         <div className="p-4 space-y-4">
           {errorMsg && (
-            <div className="flex items-start justify-between rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-300">
-              <span>{errorMsg}</span>
-              <button onClick={() => setErrorMsg(null)} className="rounded-md px-2 py-1 text-xs ring-1 ring-rose-300 hover:bg-rose-100 dark:ring-rose-700 dark:hover:bg-rose-900/30">Dismiss</button>
+            <div className="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-300">
+              <div className="flex items-start justify-between">
+                <span>{errorMsg}</span>
+                <button onClick={() => { setErrorMsg(null); setAlreadyRegistered(false); }} className="rounded-md px-2 py-1 text-xs ring-1 ring-rose-300 hover:bg-rose-100 dark:ring-rose-700 dark:hover:bg-rose-900/30">Dismiss</button>
+              </div>
+              {alreadyRegistered && step === "snapshotConfirm" && (
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={onVerifyNow} disabled={loginStatus === "verifying"} className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white dark:bg-white dark:text-slate-900">Verify now</button>
+                  <button onClick={() => { setErrorMsg(null); setAlreadyRegistered(false); setStep("select"); }} className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back to selection</button>
+                </div>
+              )}
             </div>
           )}
 
           {step === "select" && (
             <div className="space-y-3">
               <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-                <button onClick={() => setMode("verify")} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${mode === "verify" ? "bg-white shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-slate-700" : "text-slate-600 dark:text-slate-300"}`}>Verify</button>
-                <button onClick={() => setMode("register")} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${mode === "register" ? "bg-white shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-slate-700" : "text-slate-600 dark:text-slate-300"}`}>Register</button>
+                <button onClick={() => { setMode("verify"); setErrorMsg(null); setAlreadyRegistered(false); }} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${mode === "verify" ? "bg-white shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-slate-700" : "text-slate-600 dark:text-slate-300"}`}>Verify</button>
+                <button onClick={() => { setMode("register"); setErrorMsg(null); setAlreadyRegistered(false); }} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${mode === "register" ? "bg-white shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-slate-700" : "text-slate-600 dark:text-slate-300"}`}>Register</button>
               </div>
               <div className="flex gap-2">
                 <button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Continue</button>
@@ -297,7 +343,7 @@ export default function Page() {
               {result?.face && <img src={result.face} alt="registered" className="h-40 w-40 rounded-xl object-cover ring-1 ring-black/10" />}
               <div className="flex flex-wrap gap-2">
                 <button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Done</button>
-                <button onClick={() => setStep("select")} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Restart</button>
+                <button onClick={() => { resetAll(); setStep("select"); }} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Restart</button>
               </div>
             </div>
           )}
