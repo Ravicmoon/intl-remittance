@@ -1,56 +1,83 @@
 
 "use client";
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeftRight } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 
-type Entity = { id: string; name: string; type: "bank" | "fintech"; country: "UZ" | "KR" };
-type CCY = "UZS" | "KRW" | "USD";
+type Country = "KR" | "UZ";
+type CCY = "KRW" | "UZS" | "USD";
+type Entity = { id: string; name: string; type: "bank" | "fintech"; country: Country };
 
-type Props = { onStartFaceLogin?: () => void };
-
-const UZ_ENTITIES: Entity[] = [
-  { id: "paynet-bank", name: "Paynet Bank (mock)", type: "bank", country: "UZ" },
-  { id: "agrobank", name: "Agrobank (mock)", type: "bank", country: "UZ" },
-  { id: "qsystems-bank", name: "QSystems Bank (mock)", type: "bank", country: "UZ" }
-];
-
-const KR_ENTITIES: Entity[] = [
-  { id: "kookmin", name: "KB Kookmin (mock)", type: "bank", country: "KR" },
-  { id: "shinhan", name: "Shinhan (mock)", type: "bank", country: "KR" },
-  { id: "toss", name: "Toss Payments (mock)", type: "fintech", country: "KR" },
-  { id: "kakaopay", name: "KakaoPay (mock)", type: "fintech", country: "KR" }
-];
-
-const FX = {
-  KRW_TO_UZS: 9.0,
-  UZS_TO_KRW: 1 / 9.0,
-  USD_TO_KRW: 1400,
-  KRW_TO_USD: 1 / 1400,
-  USD_TO_UZS: 12000,
-  UZS_TO_USD: 1 / 12000
+type CorridorQuote = {
+  sender: Entity;
+  recipient: Entity;
+  fee: number;           // fee in sender currency
+  feeCcy: CCY;           // equals sender currency
+  estMinutes: number;    // mock speed
+  recipientGets: number; // in recipient local currency
 };
 
-function convert(value: number, from: CCY, to: CCY) {
-  if (from === to) return value;
-  if (from === "KRW" && to === "UZS") return value * FX.KRW_TO_UZS;
-  if (from === "UZS" && to === "KRW") return value * FX.UZS_TO_KRW;
-  if (from === "USD" && to === "KRW") return value * FX.USD_TO_KRW;
-  if (from === "KRW" && to === "USD") return value * FX.KRW_TO_USD;
-  if (from === "USD" && to === "UZS") return value * FX.USD_TO_UZS;
-  if (from === "UZS" && to === "USD") return value * FX.UZS_TO_USD;
-  return value;
+const UZ_OPENBANK: Entity = { id: "openbank", name: "Openbank (UZ)", type: "bank", country: "UZ" };
+const KR_ENTITIES: Entity[] = [
+  { id: "kookmin", name: "KB Kookmin", type: "bank", country: "KR" },
+  { id: "shinhan", name: "Shinhan", type: "bank", country: "KR" },
+  { id: "toss", name: "Toss Payments", type: "fintech", country: "KR" },
+  { id: "kakaopay", name: "KakaoPay", type: "fintech", country: "KR" }
+];
+
+// Mid-market baselines (mock)
+// Corrected per request: 1 UZS = 0.12 KRW  =>  1 KRW = 8.333333... UZS
+const KRW_TO_UZS = 8.333333333333334;
+const UZS_TO_KRW = 0.12;
+
+// Keep simple USD legs (consistent with KRW leg)
+const USD_TO_KRW = 1400;
+const KRW_TO_USD = 1 / USD_TO_KRW;
+const USD_TO_UZS = USD_TO_KRW * KRW_TO_UZS; // 1400 * 8.333... = 11666.666...
+const UZS_TO_USD = 1 / USD_TO_UZS;
+
+function midMarket(from: CCY, to: CCY): number {
+  if (from === to) return 1;
+  if (from === "KRW" && to === "UZS") return KRW_TO_UZS;
+  if (from === "UZS" && to === "KRW") return UZS_TO_KRW;
+  if (from === "USD" && to === "KRW") return USD_TO_KRW;
+  if (from === "KRW" && to === "USD") return KRW_TO_USD;
+  if (from === "USD" && to === "UZS") return USD_TO_UZS;
+  if (from === "UZS" && to === "USD") return UZS_TO_USD;
+  return 1;
 }
 
-const FEE_TABLE: Record<string, { base: number; pct: number; min: number; max: number; settlementCurrency: "KRW" | "UZS" }> = {
-  "paynet-bank->kookmin": { base: 2500, pct: 0.006, min: 3500, max: 120000, settlementCurrency: "KRW" },
-  "paynet-bank->toss": { base: 1800, pct: 0.0075, min: 3000, max: 90000, settlementCurrency: "KRW" },
-  "agrobank->shinhan": { base: 30000, pct: 0.0045, min: 35000, max: 1200000, settlementCurrency: "UZS" },
-  "qsystems-bank->kakaopay": { base: 2200, pct: 0.0065, min: 3500, max: 100000, settlementCurrency: "KRW" }
+// Corridor models (fees + internal FX margin). FX margin is NOT exposed in UI.
+const KR_MODELS: Record<string, { base: number; pct: number; min: number; max: number; minutes: number; fxMarginPct: number }> = {
+  kookmin:  { base: 1200, pct: 0.0040, min: 1500, max: 120000, minutes: 30, fxMarginPct: 0.0060 },
+  shinhan:  { base: 1500, pct: 0.0035, min: 1800, max: 100000, minutes: 45, fxMarginPct: 0.0055 },
+  toss:     { base:  900, pct: 0.0050, min: 1200, max:  80000, minutes: 15, fxMarginPct: 0.0070 },
+  kakaopay: { base: 1000, pct: 0.0045, min: 1300, max:  90000, minutes: 20, fxMarginPct: 0.0065 }
 };
+const UZ_MODEL = { base: 15000, pct: 0.0040, min: 18000, max: 1200000, minutes: 60, fxMarginPct: 0.0080 };
 
-export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
+function calcFee(amount: number, model: { base:number; pct:number; min:number; max:number }): number {
+  const val = Math.min(Math.max(model.base + model.pct * amount, model.min), model.max);
+  return Math.round(val);
+}
+
+export default function RemittanceCorridorDemo() {
   const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // 1) Sending country
+  const [senderCountry, setSenderCountry] = useState<Country>("KR");
+  const recipientCountry: Country = senderCountry === "KR" ? "UZ" : "KR";
+
+  // 3) Sender currency by country
+  const senderCurrencies: CCY[] = senderCountry === "KR" ? ["KRW", "USD"] : ["UZS", "USD"];
+  const [senderCcy, setSenderCcy] = useState<CCY>(senderCurrencies[0]);
+
+  // 4) Amount
+  const [amountStr, setAmountStr] = useState<string>("");
+
   useEffect(() => setMounted(true), []);
   useEffect(() => {
     try {
@@ -58,89 +85,69 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
       const next = ls === "dark" || (!ls && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
       setTheme(next);
       document.documentElement.classList.toggle("dark", next === "dark");
-    } catch {}
-  }, []);
-
-  const [uzEntity, setUzEntity] = useState<string>(UZ_ENTITIES[0].id);
-  const [krEntity, setKrEntity] = useState<string>(KR_ENTITIES[0].id);
-  const [direction, setDirection] = useState<"UZS_to_KRW" | "KRW_to_UZS">("UZS_to_KRW");
-  const [uzCurrency, setUzCurrency] = useState<CCY>("UZS");
-  const [amount, setAmount] = useState<string>("");
-
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
       const v = localStorage.getItem("lv_verified") === "1";
       const uid = localStorage.getItem("lv_user_id");
       setIsLoggedIn(!!v);
       setUserId(uid);
     } catch {}
   }, []);
-
-  function extractId(obj: any): string | null {
-    if (!obj) return null;
-    if (obj.id) return String(obj.id);
-    if (obj.identityId) return String(obj.identityId);
-    if (obj.matches && obj.matches[0]?.id) return String(obj.matches[0].id);
-    if (obj.result?.id) return String(obj.result.id);
-    return null;
-  }
-
-  const corridorKey = `${uzEntity}->${krEntity}`;
-  const feeModel = FEE_TABLE[corridorKey];
-
-  const senderCcy: CCY = direction === "UZS_to_KRW" ? uzCurrency : "KRW";
-  const recipientCcy: CCY = direction === "UZS_to_KRW" ? "KRW" : uzCurrency;
-
-  const parsedAmount = useMemo(() => {
-    const v = Number((amount || "").replace(/,/g, ""));
-    return Number.isFinite(v) ? v : 0;
-  }, [amount]);
-
-  const quote = useMemo(() => {
-    if (!feeModel) return { fee: 0, feeCcy: "KRW", recipientGets: 0 } as const;
-    const base = feeModel.base;
-    const pct = feeModel.pct * parsedAmount;
-    const rawFeeSender = Math.min(Math.max(base + pct, feeModel.min), feeModel.max);
-    const displayFee = Math.round(convert(rawFeeSender, senderCcy, feeModel.settlementCurrency as CCY));
-    const grossRecipient = convert(parsedAmount, senderCcy, recipientCcy);
-    const feeInRecipient = convert(rawFeeSender, senderCcy, recipientCcy);
-    const recipientGets = Math.max(0, Math.round(grossRecipient - feeInRecipient));
-    return { fee: displayFee, feeCcy: feeModel.settlementCurrency, recipientGets } as const;
-  }, [feeModel, parsedAmount, senderCcy, recipientCcy]);
+  useEffect(() => { setSenderCcy(senderCurrencies[0]); }, [senderCountry]);
 
   const themeBtnLabel = mounted ? (theme === "dark" ? "Light" : "Dark") : "Theme";
-  const formatNumber = (n: number) => n.toLocaleString();
+  const amount = useMemo(() => {
+    const v = Number((amountStr || "").replace(/,/g, ""));
+    return Number.isFinite(v) ? v : 0;
+  }, [amountStr]);
 
-  const handleLogout = () => {
-    try { localStorage.removeItem("lv_verified"); localStorage.removeItem("lv_user_id"); } catch {}
-    setIsLoggedIn(false);
-    setUserId(null);
-  };
+  const recipientLocal: CCY = recipientCountry === "KR" ? "KRW" : "UZS";
+  const midline = useMemo(() => {
+    const rate = midMarket(senderCcy, recipientLocal);
+    return `Mid-market: 1 ${senderCcy} ≈ ${rate.toFixed(6)} ${recipientLocal}`;
+  }, [senderCcy, recipientLocal]);
 
-  const handleDelete = async () => {
-    if (!userId) return;
-    try {
-      await fetch(`/api/moldova/identity/${encodeURIComponent(userId)}`, { method: "DELETE" });
-    } catch {}
-    handleLogout();
+  const quotes: CorridorQuote[] = useMemo(() => {
+    if (!amount || amount <= 0) return [];
+    if (senderCountry === "KR") {
+      return KR_ENTITIES.map((k) => {
+        const m = KR_MODELS[k.id];
+        const fee = calcFee(amount, m);
+        const effectiveRate = midMarket(senderCcy, recipientLocal) * (1 - m.fxMarginPct);
+        const recipientGets = Math.max(0, Math.round((amount - fee) * effectiveRate));
+        return { sender: k, recipient: UZ_OPENBANK, fee, feeCcy: senderCcy, estMinutes: m.minutes, recipientGets };
+      }).sort((a,b) => (a.fee - b.fee) || (b.recipientGets - a.recipientGets));
+    } else {
+      const m = UZ_MODEL;
+      const fee = calcFee(amount, m);
+      const effectiveRate = midMarket(senderCcy, recipientLocal) * (1 - m.fxMarginPct);
+      return KR_ENTITIES.map((k) => {
+        const recipientGets = Math.max(0, Math.round((amount - fee) * effectiveRate));
+        return { sender: UZ_OPENBANK, recipient: k, fee, feeCcy: senderCcy, estMinutes: m.minutes, recipientGets };
+      }).sort((a,b) => (a.fee - b.fee) || (b.recipientGets - a.recipientGets));
+    }
+  }, [amount, senderCountry, senderCcy, recipientLocal]);
+
+  const format = (n: number) => n.toLocaleString();
+  const goToSender = (q: CorridorQuote) => {
+    const url = "https://lightvision.ai/"; // placeholder
+    if (typeof window !== "undefined") window.location.href = url;
   };
+  const handleLogout = () => { try { localStorage.removeItem("lv_verified"); localStorage.removeItem("lv_user_id"); } catch {}; setIsLoggedIn(false); setUserId(null); };
+  const handleDelete = async () => { if (!userId) return; try { await fetch(`/api/moldova/identity/${encodeURIComponent(userId)}`, { method: "DELETE" }); } catch {}; handleLogout(); };
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950">
       <header className="sticky top-0 z-10 border-b bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-900/70">
         <div className="mx-auto flex max-w-6xl items-center justify-between p-4">
           <div className="flex items-center gap-3">
-            <img src="/lv-logo-light.svg" alt="LightVision" className="block h-6 dark:hidden" />
-            <img src="/lv-logo-dark.svg" alt="LightVision" className="hidden h-6 dark:block" />
-            <h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Uzbekistan ↔ South Korea</h1>
+            <img src="/openbank.svg" alt="Openbank" className="h-6" />
+            <img src="/lv-logo-light.png" alt="LightVision" className="block h-6 dark:hidden" />
+            <img src="/lv-logo-dark.png" alt="LightVision" className="hidden h-6 dark:block" />
+            <h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Compare Corridors</h1>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => { const next = theme === "dark" ? "light" : "dark"; setTheme(next); try { localStorage.setItem("theme", next); } catch {}; document.documentElement.classList.toggle("dark", next === "dark"); }} className="rounded-xl border px-3 py-1.5 text-sm font-semibold hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">{themeBtnLabel}</button>
             {!isLoggedIn ? (
-              <button onClick={onStartFaceLogin ?? (() => (window.location.href = "/face-login"))} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Face Login</button>
+              <button onClick={() => (window.location.href = "/face-login")} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Face Login</button>
             ) : (
               <div className="flex items-center gap-2">
                 {userId && <span className="text-sm text-slate-700 dark:text-slate-200">ID: <span className="font-semibold">{userId}</span></span>}
@@ -154,67 +161,61 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
 
       <main className="mx-auto max-w-6xl p-4">
         <div className="grid gap-6 md:grid-cols-3">
-          <section className="rounded-2xl border bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 md:col-span-2">
-            <div className="flex items-center justify-between border-b p-4 dark:border-slate-800">
-              <div className="font-semibold text-slate-800 dark:text-slate-100">Corridor & Amount</div>
-              <button
-                onClick={() => {
-                  setDirection((d) => (d === "UZS_to_KRW" ? "KRW_to_UZS" : "UZS_to_KRW"));
-                  setUzEntity((prevUz) => {
-                    const newUz = krEntity;
-                    setKrEntity(prevUz);
-                    return newUz as unknown as string;
-                  });
-                }}
-                className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm dark:border-slate-700"
-              >
-                <ArrowLeftRight className="h-4 w-4" /> Swap direction
-              </button>
+          <section className="rounded-2xl border bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 md:col-span-3">
+            <div className="border-b p-4 dark:border-slate-800">
+              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">1) Sending from</div>
+              <div className="mt-3 inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+                <button onClick={() => setSenderCountry("KR")} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${senderCountry === "KR" ? "bg-white shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-slate-700" : "text-slate-600 dark:text-slate-300"}`}>Korea</button>
+                <button onClick={() => setSenderCountry("UZ")} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${senderCountry === "UZ" ? "bg-white shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-slate-700" : "text-slate-600 dark:text-slate-300"}`}>Uzbekistan</button>
+              </div>
+              <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">Sending to: <span className="font-medium">{senderCountry === "KR" ? "Uzbekistan (UZ)" : "Korea (KR)"}</span></div>
             </div>
-            <div className="grid gap-4 p-4 md:grid-cols-2">
-              <div className="space-y-3">
-                <label className="text-sm text-slate-600 dark:text-slate-300">Uzbekistan Entity</label>
-                <select value={uzEntity} onChange={(e) => setUzEntity(e.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white">
-                  {UZ_ENTITIES.map((e) => (<option key={e.id} value={e.id}>{e.name}</option>))}
-                </select>
-                <label className="text-sm text-slate-600 dark:text-slate-300">Uz Currency</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => setUzCurrency("UZS")} className={`rounded-xl px-3 py-2 text-sm font-medium ${"UZS" === uzCurrency ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "bg-slate-100 dark:bg-slate-800 dark:text-white"}`}>UZS</button>
-                  <button onClick={() => setUzCurrency("USD")} className={`rounded-xl px-3 py-2 text-sm font-medium ${"USD" === uzCurrency ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "bg-slate-100 dark:bg-slate-800 dark:text-white"}`}>USD</button>
-                </div>
-              </div>
 
-              <div className="space-y-3">
-                <label className="text-sm text-slate-600 dark:text-slate-300">South Korea Entity</label>
-                <select value={krEntity} onChange={(e) => setKrEntity(e.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white">
-                  {KR_ENTITIES.map((e) => (<option key={e.id} value={e.id}>{e.name}{e.type === "fintech" ? " (fintech)" : ""}</option>))}
-                </select>
-                <div className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800 dark:text-slate-100">
-                  <div className="flex items-center justify-between"><span>Direction</span><span className="font-medium">{direction === "UZS_to_KRW" ? `${uzCurrency} → KRW` : `KRW → ${uzCurrency}`}</span></div>
-                </div>
-              </div>
-
-              <div className="space-y-3 md:col-span-2">
-                <label className="text-sm text-slate-600 dark:text-slate-300">Amount ({direction === "UZS_to_KRW" ? `${uzCurrency} (sender)` : "KRW (sender)"})</label>
-                <input inputMode="numeric" placeholder={direction === "UZS_to_KRW" ? (uzCurrency === "UZS" ? "e.g., 2,000,000" : "e.g., 100") : "e.g., 500,000"} value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ""))} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500" />
-                <div className="text-xs text-slate-500 dark:text-slate-400">1 USD ≈ {FX.USD_TO_KRW.toLocaleString()} KRW • 1 USD ≈ {FX.USD_TO_UZS.toLocaleString()} UZS</div>
+            <div className="border-b p-4 dark:border-slate-800">
+              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">2) Choose currency</div>
+              <div className="mt-3 inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+                {(senderCountry === "KR" ? ["KRW", "USD"] : ["UZS", "USD"]).map((ccy) => (
+                  <button key={ccy} onClick={() => setSenderCcy(ccy as CCY)} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${senderCcy === ccy ? "bg-white shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-slate-700" : "text-slate-600 dark:text-slate-300"}`}>{ccy}</button>
+                ))}
               </div>
             </div>
-          </section>
 
-          <aside className="rounded-2xl border bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <div className="font-semibold text-slate-800 dark:text-slate-100">Quote</div>
-            <div className="mt-3 rounded-xl border p-4 dark:border-slate-800">
-              {feeModel ? (
-                <div className="space-y-2 text-sm text-slate-800 dark:text-slate-100">
-                  <div className="flex items-center justify-between"><span>Fee</span><span className="font-semibold">{formatNumber(quote.fee)} {quote.feeCcy}</span></div>
-                  <div className="flex items-center justify-between"><span>Recipient gets</span><span className="font-semibold">{formatNumber(quote.recipientGets)} {recipientCcy}</span></div>
-                </div>
+            <div className="border-b p-4 dark:border-slate-800">
+              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">3) Enter amount</div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <input inputMode="numeric" placeholder={senderCountry === "KR" ? (senderCcy === "KRW" ? "e.g., 500,000" : "e.g., 200") : (senderCcy === "UZS" ? "e.g., 2,000,000" : "e.g., 200")} value={amountStr} onChange={(e) => setAmountStr(e.target.value.replace(/[^0-9.,]/g, ""))} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500" />
+                <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200">{midline}</div>
+              </div>
+            </div>
+
+            <div className="p-4">
+              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">4) Cheapest & highest payout</div>
+              {amount > 0 ? (
+                <ul className="mt-3 space-y-3">
+                  {quotes.map((q) => (
+                    <li key={`${q.sender.id}->${q.recipient.id}`}>
+                      <button onClick={() => goToSender(q)} className="group flex w-full items-center justify-between rounded-2xl border p-4 text-left hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/60">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{q.sender.name} → {q.recipient.name}</div>
+                          <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Fee: {q.fee.toLocaleString()} {q.feeCcy} • ETA ~{q.estMinutes} min</div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <div className="text-sm font-semibold text-slate-900 dark:text-white">{q.recipientGets.toLocaleString()} {recipientLocal}</div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400">Recipient gets</div>
+                          </div>
+                          <ExternalLink className="h-4 w-4 opacity-60 group-hover:opacity-100" />
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                  {quotes.length === 0 && <li className="text-sm text-slate-500 dark:text-slate-400">No corridors available.</li>}
+                </ul>
               ) : (
-                <div className="text-sm text-slate-500 dark:text-slate-400">No fee model for this corridor.</div>
+                <div className="mt-3 text-sm text-slate-500 dark:text-slate-400">Enter an amount to see corridors sorted by lowest fee and highest payout.</div>
               )}
             </div>
-          </aside>
+          </section>
         </div>
       </main>
     </div>
