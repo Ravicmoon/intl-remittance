@@ -1,18 +1,17 @@
+
 "use client";
 import React, { useEffect, useRef, useState } from "react";
 
-type Step = "welcome" | "select" | "consent" | "capture" | "snapshotConfirm" | "alignConfirm" | "processing" | "result";
+type Step = "select" | "capture" | "snapshotConfirm" | "alignConfirm" | "processing" | "result";
 
 export default function Page() {
-  const [step, setStep] = useState<Step>("welcome");
+  const [step, setStep] = useState<Step>("select");
   const [mode, setMode] = useState<"verify" | "register">("verify");
-  const [userId, setUserId] = useState("");
   const [loginStatus, setLoginStatus] = useState<"idle" | "opening" | "capturing" | "verifying" | "success" | "failed">("idle");
   const [videoReady, setVideoReady] = useState(false);
   const [snapshot, setSnapshot] = useState<string | null>(null);
   const [aligned, setAligned] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
-  const [finding, setFinding] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -45,7 +44,10 @@ export default function Page() {
     if (!streamRef.current) {
       try {
         setLoginStatus("opening");
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
         streamRef.current = stream;
       } catch {
         setLoginStatus("failed");
@@ -67,17 +69,23 @@ export default function Page() {
   };
 
   const onFile = (file?: File | null) => { if (!file) return; const r = new FileReader(); r.onload = () => setSnapshot(String(r.result)); r.readAsDataURL(file); };
-
   const stripDataUrl = (d: string | null) => d ? d.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "") : null;
 
-  async function apiCreate(imageB64NoPrefix: string, userIdValue?: string) {
+  async function apiCreate(imageB64NoPrefix: string) {
     const id = Math.floor(Math.random()*10_000_000);
-    const r = await fetch(`/api/moldova/identity`, {
+    const res = await fetch(`/api/moldova/identity`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, image: imageB64NoPrefix, userId: userIdValue })
+      body: JSON.stringify({ id, image: imageB64NoPrefix })
     });
-    const j = await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||"fail"); return j as { id: number; image: string };
+    const j = await res.json().catch(()=>({}));
+    if (!res.ok) {
+      const e: any = new Error(j?.error || "fail");
+      e.status = res.status;
+      e.data = j;
+      throw e;
+    }
+    return j as { id: number; image: string };
   }
 
   async function apiConfirm(id: number|string, imageB64NoPrefix: string){
@@ -98,40 +106,71 @@ export default function Page() {
     const j = await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||"fail"); return j;
   }
 
+  function extractId(obj: any): string | null {
+    if (!obj) return null;
+    if (obj.id) return String(obj.id);
+    if (obj.identityId) return String(obj.identityId);
+    if (obj.matches && obj.matches[0]?.id) return String(obj.matches[0].id);
+    if (obj.result?.id) return String(obj.result.id);
+    return null;
+  }
+
   const nextStep = async () => {
-    if (step === "welcome") setStep("select");
-    else if (step === "select") setStep("consent");
-    else if (step === "consent") setStep("capture");
-    else if (step === "capture") { const img = snapshot || captureFromVideo(); if (!img) return; setSnapshot(img); setStep("snapshotConfirm"); }
+    if (step === "select") setStep("capture");
+    else if (step === "capture") {
+      const img = captureFromVideo() || snapshot;
+      if (!img) return;
+      setSnapshot(img);
+      setStep("snapshotConfirm");
+    }
     else if (step === "snapshotConfirm") {
-      setLoginStatus("verifying"); setStep("alignConfirm");
-      try {
-        const raw = stripDataUrl(snapshot);
-        if(!raw) throw new Error("noimage");
-        const created = await apiCreate(raw, mode === "register" ? userId || undefined : undefined);
-        setResult({ id: created.id });
-        setAligned(`data:image/png;base64,${created.image}`);
-        setLoginStatus("idle");
-      } catch {
-        setAligned(snapshot);
-        setLoginStatus("failed");
+      if (mode === "register") {
+        setLoginStatus("verifying"); setStep("alignConfirm");
+        try {
+          const raw = stripDataUrl(snapshot);
+          if(!raw) throw new Error("noimage");
+          const created = await apiCreate(raw);
+          setResult({ id: created.id });
+          setAligned(`data:image/png;base64,${created.image}`);
+          setLoginStatus("idle");
+        } catch (e: any) {
+          if (e?.status === 409) {
+            window.alert("You are already registered to the service.");
+            setLoginStatus("idle");
+            setStep("select");
+            return;
+          }
+          setAligned(snapshot);
+          setLoginStatus("failed");
+        }
+      } else {
+        setLoginStatus("verifying"); setStep("processing");
+        try {
+          const raw = stripDataUrl(snapshot);
+          if(!raw) throw new Error("nover");
+          const r = await apiCheck(raw);
+          setResult(r);
+          const id = extractId(r);
+          if (id) {
+            try { localStorage.setItem("lv_verified", "1"); localStorage.setItem("lv_user_id", id); } catch {}
+          }
+          setLoginStatus("success"); setStep("result");
+        } catch {
+          setLoginStatus("failed"); setStep("result");
+        }
       }
     }
     else if (step === "alignConfirm") {
       setLoginStatus("verifying"); setStep("processing");
       try {
-        if (mode === "register") {
-          const id = (result?.id ?? "");
-          const raw = stripDataUrl(aligned);
-          if(!id || !raw) throw new Error("noconfirm");
-          const r = await apiConfirm(id, raw);
-          setResult((prev:any)=>({ ...prev, ...r, face: aligned }));
-        } else {
-          const raw = stripDataUrl(snapshot);
-          if(!raw) throw new Error("nover");
-          const r = await apiCheck(raw);
-          setResult(r);
-          try { localStorage.setItem("lv_verified", "1"); } catch {}
+        const id = (result?.id ?? "");
+        const raw = stripDataUrl(aligned);
+        if(!id || !raw) throw new Error("noconfirm");
+        const r = await apiConfirm(id, raw);
+        setResult((prev:any)=>({ ...prev, ...r, face: aligned }));
+        const extractedId = extractId({ ...r, id });
+        if (extractedId) {
+          try { localStorage.setItem("lv_verified", "1"); localStorage.setItem("lv_user_id", extractedId); } catch {}
         }
         setLoginStatus("success"); setStep("result");
       } catch {
@@ -142,55 +181,92 @@ export default function Page() {
   };
 
   const backStep = () => {
-    if (step === "select") setStep("welcome");
-    else if (step === "consent") setStep("select");
-    else if (step === "capture") setStep("consent");
-    else if (step === "snapshotConfirm") setStep("capture");
+    if (step === "capture") setStep("select");
+    else if (step === "snapshotConfirm") { setSnapshot(null); setAligned(null); setStep("capture"); }
     else if (step === "alignConfirm") setStep("snapshotConfirm");
-    else if (step === "result") setStep("welcome");
-  };
-
-  const doFind = async () => {
-    setFinding(true);
-    try {
-      await ensureCamera();
-      const img = captureFromVideo() || snapshot;
-      const raw = stripDataUrl(img);
-      if (!raw) return;
-      const r = await apiCheck(raw);
-      setResult((prev: any) => ({ ...prev, find: r }));
-    } finally { setFinding(false); }
+    else if (step === "result") setStep("select");
   };
 
   return (
     <main className="mx-auto grid max-w-6xl gap-6 p-4 md:grid-cols-3">
       <section className="md:col-span-2 rounded-2xl border bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="border-b p-4 font-semibold dark:border-slate-800">{step === "welcome" ? "Welcome" : step === "select" ? "Select" : step === "consent" ? "Consent" : step === "capture" ? "Capture" : step === "snapshotConfirm" ? "Confirm snapshot" : step === "alignConfirm" ? "Confirm aligned" : step === "processing" ? "Processing" : "Result"}</div>
+        <div className="border-b p-4 font-semibold dark:border-slate-800">
+          {step === "select" ? "Select" : step === "capture" ? "Capture" : step === "snapshotConfirm" ? "Confirm snapshot" : step === "alignConfirm" ? "Confirm aligned" : step === "processing" ? "Processing" : "Result"}
+        </div>
         <div className="p-4 space-y-4">
-          {step === "welcome" && (<div className="space-y-3"><p className="text-sm text-slate-600 dark:text-slate-300">We will use your camera to verify or register your face.</p><button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Start</button></div>)}
-
           {step === "select" && (
             <div className="space-y-3">
               <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
                 <button onClick={() => setMode("verify")} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${mode === "verify" ? "bg-white shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-slate-700" : "text-slate-600 dark:text-slate-300"}`}>Verify</button>
                 <button onClick={() => setMode("register")} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${mode === "register" ? "bg-white shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-slate-700" : "text-slate-600 dark:text-slate-300"}`}>Register</button>
               </div>
-              {mode === "register" && (<div><label className="text-xs text-slate-600 dark:text-slate-300">User ID</label><input value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="e.g., test-user" className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-white" /></div>)}
-              <div className="flex gap-2"><button onClick={nextStep} disabled={mode==='register' && !userId} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">Continue</button><button onClick={backStep} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button></div>
+              <div className="flex gap-2">
+                <button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Continue</button>
+                <button onClick={() => (window.location.href = "/")} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button>
+              </div>
             </div>
           )}
 
-          {step === "consent" && (<div className="space-y-3"><p className="text-sm text-slate-600 dark:text-slate-300">By continuing, you agree to capture and process facial imagery for {mode==='verify'?"verification":"registration"}.</p><div className="flex gap-2"><button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">I agree</button><button onClick={backStep} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button></div></div>)}
+          {step === "capture" && (
+            <div className="space-y-3">
+              <div className="aspect-video overflow-hidden rounded-xl bg-black/90 ring-1 ring-black/10">
+                <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <button onClick={nextStep} disabled={!videoReady && !snapshot} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">Capture Snapshot</button>
+                <label className="relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">
+                  Upload Image
+                  <input type="file" accept="image/*" onChange={(e) => onFile(e.target.files?.[0])} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+                </label>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={ensureCamera} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">
+                  {loginStatus === "capturing" ? "Restart Camera" : loginStatus === "opening" ? "Opening..." : "Start Camera"}
+                </button>
+                <button onClick={backStep} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button>
+              </div>
+              {!!snapshot && <div className="text-xs text-slate-500 dark:text-slate-400">Image loaded; you can continue.</div>}
+            </div>
+          )}
 
-          {step === "capture" && (<div className="space-y-3"><div className="aspect-video overflow-hidden rounded-xl bg-black/90 ring-1 ring-black/10"><video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" /></div><div className="grid gap-2 md:grid-cols-2"><button onClick={nextStep} disabled={!videoReady} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">Capture Snapshot</button><label className="relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Upload Image<input type="file" accept="image/*" onChange={(e) => onFile(e.target.files?.[0])} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" /></label></div><div className="flex gap-2"><button onClick={ensureCamera} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">{loginStatus === "capturing" ? "Restart Camera" : loginStatus === "opening" ? "Opening..." : "Start Camera"}</button><button onClick={backStep} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button></div></div>)}
+          {step === "snapshotConfirm" && snapshot && (
+            <div className="space-y-3">
+              <img src={snapshot} alt="snapshot" className="aspect-video w-full rounded-xl object-cover ring-1 ring-black/10" />
+              <div className="flex gap-2">
+                <button onClick={backStep} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Retake</button>
+                <button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">{mode === "register" ? "Use this" : "Verify"}</button>
+              </div>
+            </div>
+          )}
 
-          {step === "snapshotConfirm" && snapshot && (<div className="space-y-3"><img src={snapshot} alt="snapshot" className="aspect-video w-full rounded-xl object-cover ring-1 ring-black/10" /><div className="flex gap-2"><button onClick={() => setStep("capture")} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Retake</button><button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Use this</button></div></div>)}
+          {step === "alignConfirm" && (
+            <div className="space-y-3">
+              <div className="aspect-video overflow-hidden rounded-xl bg-slate-100 ring-1 ring-black/10 dark:bg-slate-800">
+                {aligned ? <img src={aligned} alt="aligned" className="h-full w-full object-contain" /> : <div className="flex h-full w-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">Aligning…</div>}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setStep("snapshotConfirm")} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button>
+                <button onClick={nextStep} disabled={!aligned && loginStatus!=="idle"} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">Confirm aligned</button>
+              </div>
+            </div>
+          )}
 
-          {step === "alignConfirm" && (<div className="space-y-3"><div className="aspect-video overflow-hidden rounded-xl bg-slate-100 ring-1 ring-black/10 dark:bg-slate-800">{aligned ? <img src={aligned} alt="aligned" className="h-full w-full object-contain" /> : <div className="flex h-full w-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">Aligning…</div>}</div><div className="flex gap-2"><button onClick={() => setStep("snapshotConfirm")} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button><button onClick={nextStep} disabled={!aligned && loginStatus!=="idle"} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">Confirm aligned</button></div></div>)}
+          {step === "processing" && (
+            <div className="space-y-3">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-full w-1/3 animate-pulse rounded-full" /></div>
+            </div>
+          )}
 
-          {step === "processing" && (<div className="space-y-3"><div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-full w-1/3 animate-pulse rounded-full bg-slate-400 dark:bg-slate-600" /></div></div>)}
-
-          {step === "result" && (<div className="space-y-4">{result?.id && <div className="text-sm">Registered ID: <span className="font-semibold">{result.id}</span></div>}{result?.face && <img src={result.face} alt="registered" className="h-40 w-40 rounded-xl object-cover ring-1 ring-black/10" />}<div className="flex flex-wrap gap-2"><button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Done</button><button onClick={() => setStep("welcome")} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Restart</button><button onClick={async()=>{await doFind();}} disabled={finding} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-indigo-500">{finding?"Finding…":"Find"}</button></div>{result?.find && (<div className="rounded-xl border p-3 text-sm dark:border-slate-800"><div className="font-semibold">Find Result</div><pre className="mt-2 whitespace-pre-wrap text-xs">{JSON.stringify(result.find, null, 2)}</pre></div>)}</div>)}
+          {step === "result" && (
+            <div className="space-y-4">
+              {result?.id && <div className="text-sm">Registered ID: <span className="font-semibold">{String(result.id)}</span></div>}
+              {result?.face && <img src={result.face} alt="registered" className="h-40 w-40 rounded-xl object-cover ring-1 ring-black/10" />}
+              <div className="flex flex-wrap gap-2">
+                <button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Done</button>
+                <button onClick={() => setStep("select")} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Restart</button>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
