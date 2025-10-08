@@ -12,6 +12,7 @@ export default function Page() {
   const [snapshot, setSnapshot] = useState<string | null>(null);
   const [aligned, setAligned] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -49,8 +50,9 @@ export default function Page() {
           audio: false
         });
         streamRef.current = stream;
-      } catch {
+      } catch (e: any) {
         setLoginStatus("failed");
+        setErrorMsg("Could not access the camera. Please grant permission or try another device.");
         return;
       }
     }
@@ -80,7 +82,7 @@ export default function Page() {
     });
     const j = await res.json().catch(()=>({}));
     if (!res.ok) {
-      const e: any = new Error(j?.error || "fail");
+      const e: any = new Error(j?.error || "Registration failed");
       e.status = res.status;
       e.data = j;
       throw e;
@@ -89,21 +91,35 @@ export default function Page() {
   }
 
   async function apiConfirm(id: number|string, imageB64NoPrefix: string){
-    const r = await fetch(`/api/moldova/identity/${id}`, {
+    const res = await fetch(`/api/moldova/identity/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ image: imageB64NoPrefix })
     });
-    const j = await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||"fail"); return j;
+    const j = await res.json().catch(()=>({}));
+    if (!res.ok) {
+      const e: any = new Error(j?.error || "Registration confirmation failed");
+      e.status = res.status;
+      e.data = j;
+      throw e;
+    }
+    return j;
   }
 
   async function apiCheck(imageB64NoPrefix: string){
-    const r = await fetch(`/api/moldova/identity/check`, {
+    const res = await fetch(`/api/moldova/identity/check`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ image: imageB64NoPrefix })
     });
-    const j = await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||"fail"); return j;
+    const j = await res.json().catch(()=>({}));
+    if (!res.ok) {
+      const e: any = new Error(j?.error || "Verification failed");
+      e.status = res.status;
+      e.data = j;
+      throw e;
+    }
+    return j;
   }
 
   function extractId(obj: any): string | null {
@@ -116,10 +132,11 @@ export default function Page() {
   }
 
   const nextStep = async () => {
+    setErrorMsg(null);
     if (step === "select") setStep("capture");
     else if (step === "capture") {
       const img = captureFromVideo() || snapshot;
-      if (!img) return;
+      if (!img) { setErrorMsg("No image captured. Please start the camera or upload a photo."); return; }
       setSnapshot(img);
       setStep("snapshotConfirm");
     }
@@ -135,16 +152,19 @@ export default function Page() {
           setLoginStatus("idle");
         } catch (e: any) {
           if (e?.status === 409) {
-            window.alert("You are already registered to the service.");
+            setErrorMsg("You are already registered to the service.");
             setLoginStatus("idle");
             setStep("select");
             return;
           }
           setAligned(snapshot);
           setLoginStatus("failed");
+          setErrorMsg(e?.message || "Registration failed. Please try again.");
+          // stay on snapshotConfirm so user can retry
+          setStep("snapshotConfirm");
         }
       } else {
-        setLoginStatus("verifying"); setStep("processing");
+        setLoginStatus("verifying");
         try {
           const raw = stripDataUrl(snapshot);
           if(!raw) throw new Error("nover");
@@ -155,13 +175,16 @@ export default function Page() {
             try { localStorage.setItem("lv_verified", "1"); localStorage.setItem("lv_user_id", id); } catch {}
           }
           setLoginStatus("success"); setStep("result");
-        } catch {
-          setLoginStatus("failed"); setStep("result");
+        } catch (e: any) {
+          setLoginStatus("failed");
+          setErrorMsg(e?.message || "Verification failed. Please retake your photo and try again.");
+          // stay on snapshotConfirm to let the user retake
+          setStep("snapshotConfirm");
         }
       }
     }
     else if (step === "alignConfirm") {
-      setLoginStatus("verifying"); setStep("processing");
+      setLoginStatus("verifying");
       try {
         const id = (result?.id ?? "");
         const raw = stripDataUrl(aligned);
@@ -173,14 +196,18 @@ export default function Page() {
           try { localStorage.setItem("lv_verified", "1"); localStorage.setItem("lv_user_id", extractedId); } catch {}
         }
         setLoginStatus("success"); setStep("result");
-      } catch {
-        setLoginStatus("failed"); setStep("result");
+      } catch (e: any) {
+        setLoginStatus("failed");
+        setErrorMsg(e?.message || "Registration confirmation failed. Please retry.");
+        // remain on alignConfirm so the user can re-confirm or go back
+        setStep("alignConfirm");
       }
     }
     else if (step === "result") { window.location.href = "/"; }
   };
 
   const backStep = () => {
+    setErrorMsg(null);
     if (step === "capture") setStep("select");
     else if (step === "snapshotConfirm") { setSnapshot(null); setAligned(null); setStep("capture"); }
     else if (step === "alignConfirm") setStep("snapshotConfirm");
@@ -194,6 +221,13 @@ export default function Page() {
           {step === "select" ? "Select" : step === "capture" ? "Capture" : step === "snapshotConfirm" ? "Confirm snapshot" : step === "alignConfirm" ? "Confirm aligned" : step === "processing" ? "Processing" : "Result"}
         </div>
         <div className="p-4 space-y-4">
+          {errorMsg && (
+            <div className="flex items-start justify-between rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-300">
+              <span>{errorMsg}</span>
+              <button onClick={() => setErrorMsg(null)} className="rounded-md px-2 py-1 text-xs ring-1 ring-rose-300 hover:bg-rose-100 dark:ring-rose-700 dark:hover:bg-rose-900/30">Dismiss</button>
+            </div>
+          )}
+
           {step === "select" && (
             <div className="space-y-3">
               <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">

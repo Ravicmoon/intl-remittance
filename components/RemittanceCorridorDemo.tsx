@@ -10,10 +10,10 @@ type Entity = { id: string; name: string; type: "bank" | "fintech"; country: Cou
 type CorridorQuote = {
   sender: Entity;
   recipient: Entity;
-  fee: number;           // fee in sender currency
-  feeCcy: CCY;           // equals sender currency
-  estMinutes: number;    // mock speed
-  recipientGets: number; // in recipient local currency
+  fee: number;
+  feeCcy: CCY;
+  estMinutes: number;
+  recipientGets: number;
 };
 
 const UZ_OPENBANK: Entity = { id: "openbank", name: "Openbank (UZ)", type: "bank", country: "UZ" };
@@ -24,16 +24,22 @@ const KR_ENTITIES: Entity[] = [
   { id: "kakaopay", name: "KakaoPay", type: "fintech", country: "KR" }
 ];
 
-// Mid-market baselines (mock)
-// Corrected per request: 1 UZS = 0.12 KRW  =>  1 KRW = 8.333333... UZS
-const KRW_TO_UZS = 8.333333333333334;
-const UZS_TO_KRW = 0.12;
+const KRW_TO_UZS = 8.333333333333334; // 1 KRW = 8.333... UZS
+const UZS_TO_KRW = 0.12;              // 1 UZS = 0.12 KRW
 
-// Keep simple USD legs (consistent with KRW leg)
 const USD_TO_KRW = 1400;
 const KRW_TO_USD = 1 / USD_TO_KRW;
-const USD_TO_UZS = USD_TO_KRW * KRW_TO_UZS; // 1400 * 8.333... = 11666.666...
+const USD_TO_UZS = USD_TO_KRW * KRW_TO_UZS;
 const UZS_TO_USD = 1 / USD_TO_UZS;
+
+type Model = { base: number; pct: number; min: number; max: number; minutes: number; fxMarginPct: number };
+const KR_MODELS: Record<string, Model> = {
+  kookmin:  { base: 1200, pct: 0.0040, min: 1500, max: 120000, minutes: 30, fxMarginPct: 0.0060 },
+  shinhan:  { base: 1500, pct: 0.0035, min: 1800, max: 100000, minutes: 45, fxMarginPct: 0.0055 },
+  toss:     { base:  900, pct: 0.0050, min: 1200, max:  80000, minutes: 15, fxMarginPct: 0.0070 },
+  kakaopay: { base: 1000, pct: 0.0045, min: 1300, max:  90000, minutes: 20, fxMarginPct: 0.0065 }
+};
+const UZ_MODEL: Model = { base: 15000, pct: 0.0040, min: 18000, max: 1200000, minutes: 60, fxMarginPct: 0.0080 };
 
 function midMarket(from: CCY, to: CCY): number {
   if (from === to) return 1;
@@ -46,36 +52,22 @@ function midMarket(from: CCY, to: CCY): number {
   return 1;
 }
 
-// Corridor models (fees + internal FX margin). FX margin is NOT exposed in UI.
-const KR_MODELS: Record<string, { base: number; pct: number; min: number; max: number; minutes: number; fxMarginPct: number }> = {
-  kookmin:  { base: 1200, pct: 0.0040, min: 1500, max: 120000, minutes: 30, fxMarginPct: 0.0060 },
-  shinhan:  { base: 1500, pct: 0.0035, min: 1800, max: 100000, minutes: 45, fxMarginPct: 0.0055 },
-  toss:     { base:  900, pct: 0.0050, min: 1200, max:  80000, minutes: 15, fxMarginPct: 0.0070 },
-  kakaopay: { base: 1000, pct: 0.0045, min: 1300, max:  90000, minutes: 20, fxMarginPct: 0.0065 }
-};
-const UZ_MODEL = { base: 15000, pct: 0.0040, min: 18000, max: 1200000, minutes: 60, fxMarginPct: 0.0080 };
-
-function calcFee(amount: number, model: { base:number; pct:number; min:number; max:number }): number {
-  const val = Math.min(Math.max(model.base + model.pct * amount, model.min), model.max);
-  return Math.round(val);
+function calcFee(amount: number, m: Model) {
+  return Math.round(Math.min(Math.max(m.base + m.pct * amount, m.min), m.max));
 }
 
 export default function RemittanceCorridorDemo() {
   const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
-
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
-  // 1) Sending country
   const [senderCountry, setSenderCountry] = useState<Country>("KR");
   const recipientCountry: Country = senderCountry === "KR" ? "UZ" : "KR";
 
-  // 3) Sender currency by country
   const senderCurrencies: CCY[] = senderCountry === "KR" ? ["KRW", "USD"] : ["UZS", "USD"];
   const [senderCcy, setSenderCcy] = useState<CCY>(senderCurrencies[0]);
 
-  // 4) Amount
   const [amountStr, setAmountStr] = useState<string>("");
 
   useEffect(() => setMounted(true), []);
@@ -108,7 +100,7 @@ export default function RemittanceCorridorDemo() {
   const quotes: CorridorQuote[] = useMemo(() => {
     if (!amount || amount <= 0) return [];
     if (senderCountry === "KR") {
-      return KR_ENTITIES.map((k) => {
+      return KR_ENTITIES.map(k => {
         const m = KR_MODELS[k.id];
         const fee = calcFee(amount, m);
         const effectiveRate = midMarket(senderCcy, recipientLocal) * (1 - m.fxMarginPct);
@@ -119,15 +111,14 @@ export default function RemittanceCorridorDemo() {
       const m = UZ_MODEL;
       const fee = calcFee(amount, m);
       const effectiveRate = midMarket(senderCcy, recipientLocal) * (1 - m.fxMarginPct);
-      return KR_ENTITIES.map((k) => {
+      return KR_ENTITIES.map(k => {
         const recipientGets = Math.max(0, Math.round((amount - fee) * effectiveRate));
         return { sender: UZ_OPENBANK, recipient: k, fee, feeCcy: senderCcy, estMinutes: m.minutes, recipientGets };
       }).sort((a,b) => (a.fee - b.fee) || (b.recipientGets - a.recipientGets));
     }
   }, [amount, senderCountry, senderCcy, recipientLocal]);
 
-  const format = (n: number) => n.toLocaleString();
-  const goToSender = (q: CorridorQuote) => {
+  const goToSender = (_q: CorridorQuote) => {
     const url = "https://lightvision.ai/"; // placeholder
     if (typeof window !== "undefined") window.location.href = url;
   };
@@ -189,7 +180,7 @@ export default function RemittanceCorridorDemo() {
             </div>
 
             <div className="p-4">
-              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">4) Cheapest & highest payout</div>
+              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">4) Lowest fee & highest payout</div>
               {amount > 0 ? (
                 <ul className="mt-3 space-y-3">
                   {quotes.map((q) => (
