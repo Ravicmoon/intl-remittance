@@ -281,7 +281,7 @@ export default function Page() {
                 <button onClick={() => { setMode("register"); setErrorMsg(null); setAlreadyRegistered(false); }} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${mode === "register" ? "bg-white shadow ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-slate-700" : "text-slate-600 dark:text-slate-300"}`}>Register</button>
               </div>
               <div className="flex gap-2">
-                <button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Continue</button>
+                <button onClick={() => nextStep()} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Continue</button>
                 <button onClick={() => (window.location.href = "/")} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button>
               </div>
             </div>
@@ -293,7 +293,7 @@ export default function Page() {
                 <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
               </div>
               <div className="grid gap-2 md:grid-cols-2">
-                <button onClick={nextStep} disabled={!videoReady && !snapshot} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">Capture Snapshot</button>
+                <button onClick={() => nextStep()} disabled={!videoReady && !snapshot} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">Capture Snapshot</button>
                 <label className="relative inline-flex cursor-pointer items-center justify-center rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">
                   Upload Image
                   <input type="file" accept="image/*" onChange={(e) => onFile(e.target.files?.[0])} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
@@ -314,7 +314,7 @@ export default function Page() {
               <img src={snapshot} alt="snapshot" className="aspect-video w-full rounded-xl object-cover ring-1 ring-black/10" />
               <div className="flex gap-2">
                 <button onClick={backStep} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Retake</button>
-                <button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">{mode === "register" ? "Use this" : "Verify"}</button>
+                <button onClick={() => nextStep()} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">{mode === "register" ? "Use this" : "Verify"}</button>
               </div>
             </div>
           )}
@@ -326,7 +326,7 @@ export default function Page() {
               </div>
               <div className="flex gap-2">
                 <button onClick={() => setStep("snapshotConfirm")} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Back</button>
-                <button onClick={nextStep} disabled={!aligned && loginStatus!=="idle"} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">Confirm aligned</button>
+                <button onClick={() => nextStep()} disabled={!aligned && loginStatus!=="idle"} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">Confirm aligned</button>
               </div>
             </div>
           )}
@@ -342,7 +342,7 @@ export default function Page() {
               {result?.id && <div className="text-sm">Registered ID: <span className="font-semibold">{String(result.id)}</span></div>}
               {result?.face && <img src={result.face} alt="registered" className="h-40 w-40 rounded-xl object-cover ring-1 ring-black/10" />}
               <div className="flex flex-wrap gap-2">
-                <button onClick={nextStep} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Done</button>
+                <button onClick={() => nextStep()} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">Done</button>
                 <button onClick={() => { resetAll(); setStep("select"); }} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700">Restart</button>
               </div>
             </div>
