@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 const BASE = process.env.MOLDOVA_BASE_URL ?? "";
 const API_PREFIX = process.env.MOLDOVA_API_PREFIX ?? "/moldova/v2";
 const API_KEY = process.env.MOLDOVA_API_KEY ?? "";

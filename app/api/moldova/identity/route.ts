@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 const base = process.env.MOLDOVA_BASE_URL || "";
 const prefix = process.env.MOLDOVA_API_PREFIX || "/moldova/v2";
 const key = process.env.MOLDOVA_API_KEY || "";
