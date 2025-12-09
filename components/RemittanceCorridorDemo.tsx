@@ -224,8 +224,9 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
 
   const quotes: CorridorQuote[] = useMemo(() => {
     if (!amount || amount <= 0) return [];
+    let allQuotes: CorridorQuote[];
     if (senderCountry === "KR") {
-      return KR_ENTITIES.flatMap((k) => {
+      allQuotes = KR_ENTITIES.flatMap((k) => {
         const base = KR_MODELS[k.id];
         const feeModel = (feeOverrides?.[k.id] ?? base) as FeeCore;
         const baseFee = calcFee(amount, feeModel);
@@ -246,9 +247,9 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
             recipientGets
           };
         });
-      }).sort((a,b) => b.recipientGets - a.recipientGets);
+      });
     } else {
-      return UZ_ENTITIES.flatMap((uz) => {
+      allQuotes = UZ_ENTITIES.flatMap((uz) => {
         const base = UZ_MODELS[uz.id];
         const feeModel = (feeOverrides?.[`uz_${uz.id}`] ?? base) as FeeCore;
         const baseFee = calcFee(amount, feeModel);
@@ -262,8 +263,28 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
           const recipientGets = Math.max(0, Math.round(amount * effectiveRate));
           return { sender: uz, recipient: k, fee: adjustedFee, feeCcy: senderCcy, estMinutes: adjustedMinutes, recipientGets };
         });
-      }).sort((a,b) => b.recipientGets - a.recipientGets);
+      });
     }
+    
+    // x
+    const groupedBySender = new Map<string, CorridorQuote[]>();
+    for (const quote of allQuotes) {
+      const senderId = quote.sender.id;
+      if (!groupedBySender.has(senderId)) {
+        groupedBySender.set(senderId, []);
+      }
+      groupedBySender.get(senderId)!.push(quote);
+    }
+    
+    const filteredQuotes: CorridorQuote[] = [];
+    for (const [_, quotesForSender] of groupedBySender) {
+      // fee 기준으로 정렬하고 상위 2개만 선택
+      const sortedByFee = [...quotesForSender].sort((a, b) => a.fee - b.fee);
+      filteredQuotes.push(...sortedByFee.slice(0, 2));
+    }
+    
+    // recipientGets 기준으로 최종 정렬
+    return filteredQuotes.sort((a, b) => b.recipientGets - a.recipientGets);
   }, [amount, senderCountry, senderCcy, recipientLocal, fxMargins, feeOverrides]);
 
   const goToSender = (_q: CorridorQuote) => {
@@ -278,7 +299,7 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
       <header className="sticky top-0 z-10 border-b bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-900/70">
         <div className="mx-auto flex max-w-6xl items-center justify-between p-4">
           <div className="flex items-center gap-3">
-            <img src="/openbank.svg" alt="Openbank" className="h-6 dark:invert" />
+            <img src="/openbank.svg" alt="Openbank" className="block h-6 dark:hidden" />
             <img src="/lv-logo-light.png" alt="LightVision" className="block h-6 dark:hidden" />
             <img src="/lv-logo-dark.png" alt="LightVision" className="hidden h-6 dark:block" />
             <h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Compare Corridors</h1>
