@@ -76,7 +76,7 @@ const CORRIDOR_PAIR_ADJUSTS: Record<string, Record<string, CorridorPairAdjust>> 
     openbank: { feeMultiplier: 0.7, minutesOffset: 3 },
     asaka:    { feeMultiplier: 1.0, minutesOffset: 0 },
     sqb:      { feeMultiplier: 0.9, minutesOffset: -8 },
-    kapital:  { feeMultiplier: 1.1, minutesOffset: 4 }
+    kapital:  { feeMultiplier: 1.2, minutesOffset: 4 }
   },
   paygate: {
     openbank: { feeMultiplier: 1.1, minutesOffset: -3 },
@@ -267,7 +267,7 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
   }, [amount, senderCountry, senderCcy, recipientLocal, fxMargins, feeOverrides]);
 
   const goToSender = (_q: CorridorQuote) => {
-    const url = "https://lightvision.ai/"; // placeholder
+    const url = "https://www.oneremit.co.kr/web/main.view"; // placeholder
     if (typeof window !== "undefined") window.location.href = url;
   };
   const handleLogout = () => { try { localStorage.removeItem("lv_verified"); localStorage.removeItem("lv_user_id"); } catch {}; setIsLoggedIn(false); setUserId(null); };
@@ -278,7 +278,7 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
       <header className="sticky top-0 z-10 border-b bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-900/70">
         <div className="mx-auto flex max-w-6xl items-center justify-between p-4">
           <div className="flex items-center gap-3">
-            <img src="/openbank.svg" alt="Openbank" className="h-6" />
+            <img src="/openbank.svg" alt="Openbank" className="h-6 dark:invert" />
             <img src="/lv-logo-light.png" alt="LightVision" className="block h-6 dark:hidden" />
             <img src="/lv-logo-dark.png" alt="LightVision" className="hidden h-6 dark:block" />
             <h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Compare Corridors</h1>
