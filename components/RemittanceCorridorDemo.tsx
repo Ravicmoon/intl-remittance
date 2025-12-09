@@ -283,8 +283,14 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
       filteredQuotes.push(...sortedByFee.slice(0, 2));
     }
     
-    // recipientGets 기준으로 최종 정렬
-    return filteredQuotes.sort((a, b) => b.recipientGets - a.recipientGets);
+    // recipientGets에 작은 랜덤 차감 적용 (0~1% 범위)
+    const quotesWithRandomDeduction = filteredQuotes.map(quote => ({
+      ...quote,
+      recipientGets: Math.max(0, Math.round(quote.recipientGets * (1 - Math.random() * 0.01)))
+    }));
+    
+    // recipientGets 기준으로 최종 정렬 후 상위 5개만 반환
+    return quotesWithRandomDeduction.sort((a, b) => b.recipientGets - a.recipientGets).slice(0, 5);
   }, [amount, senderCountry, senderCcy, recipientLocal, fxMargins, feeOverrides]);
 
   const goToSender = (_q: CorridorQuote) => {
@@ -299,7 +305,7 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
       <header className="sticky top-0 z-10 border-b bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-900/70">
         <div className="mx-auto flex max-w-6xl items-center justify-between p-4">
           <div className="flex items-center gap-3">
-            <img src="/openbank.svg" alt="Openbank" className="block h-6 dark:hidden" />
+            <img src="/openbank.svg" alt="Openbank" className="block h-6 dark:invert" />
             <img src="/lv-logo-light.png" alt="LightVision" className="block h-6 dark:hidden" />
             <img src="/lv-logo-dark.png" alt="LightVision" className="hidden h-6 dark:block" />
             <h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Compare Corridors</h1>
