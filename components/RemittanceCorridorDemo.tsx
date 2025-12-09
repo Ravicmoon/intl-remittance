@@ -246,7 +246,7 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
             recipientGets
           };
         });
-      }).sort((a,b) => (a.fee - b.fee) || (b.recipientGets - a.recipientGets));
+      }).sort((a,b) => b.recipientGets - a.recipientGets);
     } else {
       return UZ_ENTITIES.flatMap((uz) => {
         const base = UZ_MODELS[uz.id];
@@ -262,7 +262,7 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
           const recipientGets = Math.max(0, Math.round(amount * effectiveRate));
           return { sender: uz, recipient: k, fee: adjustedFee, feeCcy: senderCcy, estMinutes: adjustedMinutes, recipientGets };
         });
-      }).sort((a,b) => (a.fee - b.fee) || (b.recipientGets - a.recipientGets));
+      }).sort((a,b) => b.recipientGets - a.recipientGets);
     }
   }, [amount, senderCountry, senderCcy, recipientLocal, fxMargins, feeOverrides]);
 
