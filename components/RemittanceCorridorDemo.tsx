@@ -174,7 +174,8 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
         const fee = calcFee(amount, feeModel);
         const margin = fxMargins?.[k.id] ?? base.fxMarginPct;
         const effectiveRate = midMarket(senderCcy, recipientLocal) * (1 - margin);
-        const recipientGets = Math.max(0, Math.round((amount - fee) * effectiveRate));
+        // const recipientGets = Math.max(0, Math.round((amount - fee) * effectiveRate));
+        const recipientGets = Math.max(0, Math.round(amount * effectiveRate));
         return { sender: k, recipient: UZ_OPENBANK, fee, feeCcy: senderCcy, estMinutes: base.minutes, recipientGets };
       }).sort((a,b) => (a.fee - b.fee) || (b.recipientGets - a.recipientGets));
     } else {
@@ -184,7 +185,8 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
       const margin = fxMargins?.uz_openbank ?? base.fxMarginPct;
       const effectiveRate = midMarket(senderCcy, recipientLocal) * (1 - margin);
       return KR_ENTITIES.map((k) => {
-        const recipientGets = Math.max(0, Math.round((amount - fee) * effectiveRate));
+        // const recipientGets = Math.max(0, Math.round((amount - fee) * effectiveRate));
+        const recipientGets = Math.max(0, Math.round(amount * effectiveRate));
         return { sender: UZ_OPENBANK, recipient: k, fee, feeCcy: senderCcy, estMinutes: base.minutes, recipientGets };
       }).sort((a,b) => (a.fee - b.fee) || (b.recipientGets - a.recipientGets));
     }
