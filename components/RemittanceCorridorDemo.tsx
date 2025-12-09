@@ -17,12 +17,16 @@ type CorridorQuote = {
 };
 
 // Entities
-const UZ_OPENBANK: Entity = { id: "openbank", name: "Openbank (UZ)", type: "bank", country: "UZ" };
+const UZ_ENTITIES: Entity[] = [
+  { id: "openbank", name: "Openbank", type: "bank", country: "UZ" },
+  { id: "asaka", name: "Asaka Bank", type: "bank", country: "UZ" },
+  { id: "sqb", name: "SQB", type: "bank", country: "UZ" },
+  { id: "kapital", name: "Kapital Bank", type: "bank", country: "UZ" }
+];
 const KR_ENTITIES: Entity[] = [
-  { id: "kookmin", name: "KB Kookmin", type: "bank", country: "KR" },
-  { id: "shinhan", name: "Shinhan", type: "bank", country: "KR" },
-  { id: "toss", name: "Toss Payments", type: "fintech", country: "KR" },
-  { id: "kakaopay", name: "KakaoPay", type: "fintech", country: "KR" }
+  { id: "cnbpay", name: "CNB Pay", type: "fintech", country: "KR" },
+  { id: "moin", name: "Moin", type: "fintech", country: "KR" },
+  { id: "paygate", name: "Paygate", type: "fintech", country: "KR" }
 ];
 
 // Mid-market baselines (mock, corrected): 1 UZS = 0.12 KRW → 1 KRW = 8.333333… UZS
@@ -47,12 +51,16 @@ function midMarket(from: CCY, to: CCY): number {
 // Base corridor models (UI hides FX margin; used only in math)
 type Model = { base: number; pct: number; min: number; max: number; minutes: number; fxMarginPct: number };
 const KR_MODELS: Record<string, Model> = {
-  kookmin:  { base: 1200, pct: 0.0040, min: 1500, max: 120000, minutes: 30, fxMarginPct: 0.0060 },
-  shinhan:  { base: 1500, pct: 0.0035, min: 1800, max: 100000, minutes: 45, fxMarginPct: 0.0055 },
-  toss:     { base:  900, pct: 0.0050, min: 1200, max:  80000, minutes: 15, fxMarginPct: 0.0070 },
-  kakaopay: { base: 1000, pct: 0.0045, min: 1300, max:  90000, minutes: 20, fxMarginPct: 0.0065 }
+  cnbpay:  { base: 1200, pct: 0.0040, min: 1500, max: 120000, minutes: 30, fxMarginPct: 0.0060 },
+  moin:    { base: 1500, pct: 0.0035, min: 1800, max: 100000, minutes: 45, fxMarginPct: 0.0055 },
+  paygate: { base:  900, pct: 0.0050, min: 1200, max:  80000, minutes: 15, fxMarginPct: 0.0070 }
 };
-const UZ_MODEL: Model = { base: 15000, pct: 0.0040, min: 18000, max: 1200000, minutes: 60, fxMarginPct: 0.0080 };
+const UZ_MODELS: Record<string, Model> = {
+  openbank: { base: 15000, pct: 0.0040, min: 18000, max: 1200000, minutes: 60, fxMarginPct: 0.0080 },
+  asaka:    { base: 16000, pct: 0.0042, min: 19000, max: 1300000, minutes: 65, fxMarginPct: 0.0082 },
+  sqb:      { base: 14000, pct: 0.0038, min: 17000, max: 1100000, minutes: 55, fxMarginPct: 0.0078 },
+  kapital:  { base: 15500, pct: 0.0041, min: 18500, max: 1250000, minutes: 62, fxMarginPct: 0.0081 }
+};
 
 // --- Randomization (per visit, persisted in sessionStorage) ---
 type FxMap = Record<string, number>;
@@ -74,11 +82,13 @@ const jitterAbsHundreds = (n: number, ratio = 0.15) =>
 
 function genFxMargins(): FxMap {
   return {
-    kookmin:  jitterFx(KR_MODELS.kookmin.fxMarginPct),
-    shinhan:  jitterFx(KR_MODELS.shinhan.fxMarginPct),
-    toss:     jitterFx(KR_MODELS.toss.fxMarginPct),
-    kakaopay: jitterFx(KR_MODELS.kakaopay.fxMarginPct),
-    uz_openbank: jitterFx(UZ_MODEL.fxMarginPct),
+    cnbpay:  jitterFx(KR_MODELS.cnbpay.fxMarginPct),
+    moin:    jitterFx(KR_MODELS.moin.fxMarginPct),
+    paygate: jitterFx(KR_MODELS.paygate.fxMarginPct),
+    uz_openbank: jitterFx(UZ_MODELS.openbank.fxMarginPct),
+    uz_asaka:    jitterFx(UZ_MODELS.asaka.fxMarginPct),
+    uz_sqb:      jitterFx(UZ_MODELS.sqb.fxMarginPct),
+    uz_kapital:  jitterFx(UZ_MODELS.kapital.fxMarginPct),
   };
 }
 function genFeeOverrides(): FeeMap {
@@ -90,11 +100,13 @@ function genFeeOverrides(): FeeMap {
     return { base, pct, min, max };
   };
   return {
-    kookmin: j(KR_MODELS.kookmin),
-    shinhan: j(KR_MODELS.shinhan),
-    toss: j(KR_MODELS.toss),
-    kakaopay: j(KR_MODELS.kakaopay),
-    uz_openbank: j(UZ_MODEL),
+    cnbpay: j(KR_MODELS.cnbpay),
+    moin: j(KR_MODELS.moin),
+    paygate: j(KR_MODELS.paygate),
+    uz_openbank: j(UZ_MODELS.openbank),
+    uz_asaka: j(UZ_MODELS.asaka),
+    uz_sqb: j(UZ_MODELS.sqb),
+    uz_kapital: j(UZ_MODELS.kapital),
   };
 }
 
@@ -168,7 +180,7 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
   const quotes: CorridorQuote[] = useMemo(() => {
     if (!amount || amount <= 0) return [];
     if (senderCountry === "KR") {
-      return KR_ENTITIES.map((k) => {
+      return KR_ENTITIES.flatMap((k) => {
         const base = KR_MODELS[k.id];
         const feeModel = (feeOverrides?.[k.id] ?? base) as FeeCore;
         const fee = calcFee(amount, feeModel);
@@ -176,18 +188,27 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
         const effectiveRate = midMarket(senderCcy, recipientLocal) * (1 - margin);
         // const recipientGets = Math.max(0, Math.round((amount - fee) * effectiveRate));
         const recipientGets = Math.max(0, Math.round(amount * effectiveRate));
-        return { sender: k, recipient: UZ_OPENBANK, fee, feeCcy: senderCcy, estMinutes: base.minutes, recipientGets };
+        return UZ_ENTITIES.map((uz) => ({
+          sender: k,
+          recipient: uz,
+          fee,
+          feeCcy: senderCcy,
+          estMinutes: base.minutes,
+          recipientGets
+        }));
       }).sort((a,b) => (a.fee - b.fee) || (b.recipientGets - a.recipientGets));
     } else {
-      const base = UZ_MODEL;
-      const feeModel = (feeOverrides?.uz_openbank ?? base) as FeeCore;
-      const fee = calcFee(amount, feeModel);
-      const margin = fxMargins?.uz_openbank ?? base.fxMarginPct;
-      const effectiveRate = midMarket(senderCcy, recipientLocal) * (1 - margin);
-      return KR_ENTITIES.map((k) => {
-        // const recipientGets = Math.max(0, Math.round((amount - fee) * effectiveRate));
-        const recipientGets = Math.max(0, Math.round(amount * effectiveRate));
-        return { sender: UZ_OPENBANK, recipient: k, fee, feeCcy: senderCcy, estMinutes: base.minutes, recipientGets };
+      return UZ_ENTITIES.flatMap((uz) => {
+        const base = UZ_MODELS[uz.id];
+        const feeModel = (feeOverrides?.[`uz_${uz.id}`] ?? base) as FeeCore;
+        const fee = calcFee(amount, feeModel);
+        const margin = fxMargins?.[`uz_${uz.id}`] ?? base.fxMarginPct;
+        const effectiveRate = midMarket(senderCcy, recipientLocal) * (1 - margin);
+        return KR_ENTITIES.map((k) => {
+          // const recipientGets = Math.max(0, Math.round((amount - fee) * effectiveRate));
+          const recipientGets = Math.max(0, Math.round(amount * effectiveRate));
+          return { sender: uz, recipient: k, fee, feeCcy: senderCcy, estMinutes: base.minutes, recipientGets };
+        });
       }).sort((a,b) => (a.fee - b.fee) || (b.recipientGets - a.recipientGets));
     }
   }, [amount, senderCountry, senderCcy, recipientLocal, fxMargins, feeOverrides]);
