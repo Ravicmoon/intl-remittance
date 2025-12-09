@@ -62,6 +62,51 @@ const UZ_MODELS: Record<string, Model> = {
   kapital:  { base: 15500, pct: 0.0041, min: 18500, max: 1250000, minutes: 62, fxMarginPct: 0.0081 }
 };
 
+// Corridor pair adjustments: fee multiplier and minutes offset per sender-recipient pair
+type CorridorPairAdjust = { feeMultiplier: number; minutesOffset: number };
+const CORRIDOR_PAIR_ADJUSTS: Record<string, Record<string, CorridorPairAdjust>> = {
+  // KR -> UZ corridors
+  cnbpay: {
+    openbank: { feeMultiplier: 1.0, minutesOffset: 0 },
+    asaka:    { feeMultiplier: 0.8, minutesOffset: -5 },
+    sqb:      { feeMultiplier: 1.05, minutesOffset: 5 },
+    kapital:  { feeMultiplier: 0.9, minutesOffset: -2 }
+  },
+  moin: {
+    openbank: { feeMultiplier: 0.7, minutesOffset: 3 },
+    asaka:    { feeMultiplier: 1.0, minutesOffset: 0 },
+    sqb:      { feeMultiplier: 0.9, minutesOffset: -8 },
+    kapital:  { feeMultiplier: 1.1, minutesOffset: 4 }
+  },
+  paygate: {
+    openbank: { feeMultiplier: 1.1, minutesOffset: -3 },
+    asaka:    { feeMultiplier: 1.2, minutesOffset: 2 },
+    sqb:      { feeMultiplier: 1.3, minutesOffset: 0 },
+    kapital:  { feeMultiplier: 1.5, minutesOffset: -1 }
+  },
+  // UZ -> KR corridors
+  openbank: {
+    cnbpay:  { feeMultiplier: 1.0, minutesOffset: 0 },
+    moin:    { feeMultiplier: 1.1, minutesOffset: 6 },
+    paygate: { feeMultiplier: 0.9, minutesOffset: -4 }
+  },
+  asaka: {
+    cnbpay:  { feeMultiplier: 0.9, minutesOffset: -3 },
+    moin:    { feeMultiplier: 1.0, minutesOffset: 0 },
+    paygate: { feeMultiplier: 1.2, minutesOffset: 3 }
+  },
+  sqb: {
+    cnbpay:  { feeMultiplier: 1.0, minutesOffset: 4 },
+    moin:    { feeMultiplier: 0.9, minutesOffset: -5 },
+    paygate: { feeMultiplier: 1.1, minutesOffset: 2 }
+  },
+  kapital: {
+    cnbpay:  { feeMultiplier: 0.9, minutesOffset: -2 },
+    moin:    { feeMultiplier: 1.0, minutesOffset: 7 },
+    paygate: { feeMultiplier: 1.1, minutesOffset: -6 }
+  }
+};
+
 // --- Randomization (per visit, persisted in sessionStorage) ---
 type FxMap = Record<string, number>;
 type FeeCore = { base: number; pct: number; min: number; max: number };
@@ -183,31 +228,39 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
       return KR_ENTITIES.flatMap((k) => {
         const base = KR_MODELS[k.id];
         const feeModel = (feeOverrides?.[k.id] ?? base) as FeeCore;
-        const fee = calcFee(amount, feeModel);
+        const baseFee = calcFee(amount, feeModel);
         const margin = fxMargins?.[k.id] ?? base.fxMarginPct;
         const effectiveRate = midMarket(senderCcy, recipientLocal) * (1 - margin);
         // const recipientGets = Math.max(0, Math.round((amount - fee) * effectiveRate));
         const recipientGets = Math.max(0, Math.round(amount * effectiveRate));
-        return UZ_ENTITIES.map((uz) => ({
-          sender: k,
-          recipient: uz,
-          fee,
-          feeCcy: senderCcy,
-          estMinutes: base.minutes,
-          recipientGets
-        }));
+        return UZ_ENTITIES.map((uz) => {
+          const pairAdjust = CORRIDOR_PAIR_ADJUSTS[k.id]?.[uz.id] ?? { feeMultiplier: 1.0, minutesOffset: 0 };
+          const adjustedFee = toHundreds(baseFee * pairAdjust.feeMultiplier);
+          const adjustedMinutes = Math.max(1, base.minutes + pairAdjust.minutesOffset);
+          return {
+            sender: k,
+            recipient: uz,
+            fee: adjustedFee,
+            feeCcy: senderCcy,
+            estMinutes: adjustedMinutes,
+            recipientGets
+          };
+        });
       }).sort((a,b) => (a.fee - b.fee) || (b.recipientGets - a.recipientGets));
     } else {
       return UZ_ENTITIES.flatMap((uz) => {
         const base = UZ_MODELS[uz.id];
         const feeModel = (feeOverrides?.[`uz_${uz.id}`] ?? base) as FeeCore;
-        const fee = calcFee(amount, feeModel);
+        const baseFee = calcFee(amount, feeModel);
         const margin = fxMargins?.[`uz_${uz.id}`] ?? base.fxMarginPct;
         const effectiveRate = midMarket(senderCcy, recipientLocal) * (1 - margin);
         return KR_ENTITIES.map((k) => {
+          const pairAdjust = CORRIDOR_PAIR_ADJUSTS[uz.id]?.[k.id] ?? { feeMultiplier: 1.0, minutesOffset: 0 };
+          const adjustedFee = toHundreds(baseFee * pairAdjust.feeMultiplier);
+          const adjustedMinutes = Math.max(1, base.minutes + pairAdjust.minutesOffset);
           // const recipientGets = Math.max(0, Math.round((amount - fee) * effectiveRate));
           const recipientGets = Math.max(0, Math.round(amount * effectiveRate));
-          return { sender: uz, recipient: k, fee, feeCcy: senderCcy, estMinutes: base.minutes, recipientGets };
+          return { sender: uz, recipient: k, fee: adjustedFee, feeCcy: senderCcy, estMinutes: adjustedMinutes, recipientGets };
         });
       }).sort((a,b) => (a.fee - b.fee) || (b.recipientGets - a.recipientGets));
     }
