@@ -278,7 +278,7 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
             </div>
 
             <div className="p-4">
-              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">4) Lowest fee & highest payout</div>
+              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">4) Highest payout</div>
               {amount > 0 ? (
                 <ul className="mt-3 space-y-3">
                   {quotes.map((q) => (
@@ -292,7 +292,11 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
                             {q.sender.name} → {q.recipient.name}
                           </div>
                           <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                            Fee: {q.fee.toLocaleString()} {q.feeCcy} • ETA ~{q.estMinutes} min
+                            Fee: {(() => {
+                              const modelCcy: CCY = senderCountry === "KR" ? "KRW" : "UZS";
+                              const convertedFee = q.fee * midMarket(modelCcy, senderCcy);
+                              return convertedFee.toLocaleString();
+                            })()} {senderCcy} • ETA ~{q.estMinutes} min
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
