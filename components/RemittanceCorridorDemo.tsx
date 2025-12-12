@@ -308,7 +308,7 @@ export default function RemittanceCorridorDemo({ onStartFaceLogin }: Props) {
             <img src="/openbank.svg" alt="Openbank" className="block h-6 dark:invert" />
             <img src="/lv-logo-light.png" alt="LightVision" className="block h-6 dark:hidden" />
             <img src="/lv-logo-dark.png" alt="LightVision" className="hidden h-6 dark:block" />
-            <h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Compare Corridors</h1>
+            <h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Global Remittance Cost Intelligence</h1>
           </div>
           <div className="flex items-center gap-2">
             <button
